@@ -10,8 +10,14 @@ import { configManager } from '../config/manager';
 import { loadProviderConfig } from '../config/provider';
 import { OpenAIProvider } from '../providers/openai';
 import { runAgent } from '../agent/loop';
+import type { PlanItem } from '../tools/plan';
 
 type Screen = 'chat' | 'provider-picker' | 'add-provider';
+
+type Usage = {
+  promptTokens: number;
+  completionTokens: number;
+};
 
 // Map low-level errors back to actionable guidance for the user. The full
 // error object is still surfaced separately when debug mode is on.
@@ -85,11 +91,15 @@ export const App: React.FC = () => {
 
   // Tools enabled (useful for debugging provider errors)
   const [toolsEnabled, setToolsEnabled] = useState(true);
+  const [usage, setUsage] = useState<Usage>({ promptTokens: 0, completionTokens: 0 });
+  const [plan, setPlan] = useState<PlanItem[]>([]);
+  const [todoRailOpen, setTodoRailOpen] = useState(false);
+  const [todoRailHidden, setTodoRailHidden] = useState(false);
 
   // Command suggestions
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
-  const knownCommands = ['/provider', '/plan', '/debug-mode', '/debug', '/tools', '/help', '/exit', '/quit'];
+  const knownCommands = ['/provider', '/plan', '/todo', '/debug-mode', '/debug', '/tools', '/help', '/exit', '/quit'];
 
   // Update suggestions when input changes
   React.useEffect(() => {
@@ -102,34 +112,14 @@ export const App: React.FC = () => {
     }
   }, [input]);
 
-  // Scrolling state (Grok Build style internal scrolling)
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const [terminalRows, setTerminalRows] = useState(24); // default fallback
-
   // Current provider info for the input bar (Grok Build style)
   const activeProfile = configManager.getActiveProvider();
   const currentProviderName = activeProfile?.name || (process.env.ZERO_PROVIDER_COMMAND ? 'command' : 'env');
   const currentModel = activeProfile?.model || process.env.OPENAI_MODEL || 'default';
-
-  // Track terminal size for proper scrolling
-  React.useEffect(() => {
-    const updateSize = () => {
-      setTerminalRows(process.stdout.rows || 24);
-    };
-    process.stdout.on('resize', updateSize);
-    updateSize();
-    return () => {
-      process.stdout.off('resize', updateSize);
-    };
-  }, []);
-
-  // Auto-scroll to bottom when new messages arrive (unless user scrolled up)
-  React.useEffect(() => {
-    // Only auto-scroll if user is near the bottom
-    if (scrollOffset <= 3) {
-      setScrollOffset(0);
-    }
-  }, [messages.length]);
+  const totalTokens = usage.promptTokens + usage.completionTokens;
+  const hasPlanItems = plan.length > 0;
+  const hasActivePlanItems = plan.some((item) => item.status !== 'completed');
+  const showTodoRail = todoRailOpen || (hasPlanItems && hasActivePlanItems && !todoRailHidden);
 
   // Only capture main chat input when we're actually in the chat screen
   const isInChat = screen === 'chat';
@@ -143,32 +133,9 @@ export const App: React.FC = () => {
     // Don't process chat input while in provider picker or add flow
     if (!isInChat) return;
 
-    // Scrolling controls (when input is empty)
-    if (!input) {
-      if (key.upArrow) {
-        setScrollOffset((prev) => Math.min(prev + 1, messages.length - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setScrollOffset((prev) => Math.max(prev - 1, 0));
-        return;
-      }
-      if (key.pageUp) {
-        setScrollOffset((prev) => Math.min(prev + 8, messages.length - 1));
-        return;
-      }
-      if (key.pageDown) {
-        setScrollOffset((prev) => Math.max(prev - 8, 0));
-        return;
-      }
-      if (key.home) {
-        setScrollOffset(messages.length - 1);
-        return;
-      }
-      if (key.end) {
-        setScrollOffset(0);
-        return;
-      }
+    if (key.ctrl && inputChar === 't') {
+      toggleTodoRail();
+      return;
     }
 
     if (key.return) {
@@ -274,6 +241,21 @@ export const App: React.FC = () => {
               return newMessages;
             });
           },
+          onUsage: (nextUsage) => {
+            setUsage((current) => ({
+              promptTokens: current.promptTokens + nextUsage.promptTokens,
+              completionTokens: current.completionTokens + nextUsage.completionTokens,
+            }));
+          },
+          onPlanUpdate: (nextPlan) => {
+            setPlan((current) => {
+              if (nextPlan.length > 0 && current.length === 0) {
+                setTodoRailHidden(false);
+                setTodoRailOpen(false);
+              }
+              return nextPlan;
+            });
+          },
         });
       } catch (err: any) {
         setIsThinking(false);
@@ -319,7 +301,7 @@ export const App: React.FC = () => {
 
   const handleSlashCommand = (command: string) => {
     const parts = command.trim().split(/\s+/);
-    const cmd = parts[0].toLowerCase();
+    const cmd = (parts[0] ?? '').toLowerCase();
     const arg = parts[1]?.toLowerCase();
 
     if (cmd === '/provider') {
@@ -377,12 +359,22 @@ export const App: React.FC = () => {
       return;
     }
 
+    if (cmd === '/todo') {
+      toggleTodoRail();
+      setMessages((prev) => [
+        ...prev,
+        { type: 'system', content: `Todo rail ${showTodoRail ? 'hidden' : 'shown'}.` },
+      ]);
+      return;
+    }
+
     if (cmd === '/help') {
       setMessages((prev) => [
         ...prev,
         { type: 'system', content: 'Available commands:' },
         { type: 'system', content: '  /provider     - Manage LLM providers (fix provider errors here)' },
         { type: 'system', content: '  /plan         - Toggle Plan Mode (agent plans first, makes no edits)' },
+        { type: 'system', content: '  /todo         - Show or hide the current plan rail' },
         { type: 'system', content: '  /debug-mode   - Toggle debug mode (prints full errors to console)' },
         { type: 'system', content: '  /tools        - Toggle tool calling (useful for debugging provider errors)' },
         { type: 'system', content: '  /help         - Show this help' },
@@ -397,6 +389,16 @@ export const App: React.FC = () => {
     }
 
     setMessages((prev) => [...prev, { type: 'system', content: `Unknown command: ${command}` }]);
+  };
+
+  const toggleTodoRail = () => {
+    if (showTodoRail) {
+      setTodoRailOpen(false);
+      setTodoRailHidden(true);
+    } else {
+      setTodoRailHidden(false);
+      setTodoRailOpen(true);
+    }
   };
 
   const handleProviderSelected = (name: string) => {
@@ -463,20 +465,20 @@ export const App: React.FC = () => {
 
   const showLogo = messages.length <= 2;
 
-  // Calculate visible messages for scrolling (Grok Build style)
-  const chatHeight = Math.max(8, terminalRows - 6); // leave room for input + status
-  const visibleMessages = messages.slice(scrollOffset, scrollOffset + chatHeight);
-
-  const canScrollUp = scrollOffset < messages.length - 1;
-  const canScrollDown = scrollOffset > 0;
-
   return (
     <Box flexDirection="column" height="100%">
-      {/* Scrollable messages area with right-side scroll indicator (Grok Build style) */}
+      <Header
+        provider={currentProviderName}
+        model={currentModel}
+        usage={usage}
+        totalTokens={totalTokens}
+        planMode={isPlanMode}
+      />
+
+      {/* Message area; render the transcript directly so terminal scrollback stays useful. */}
       <Box 
         flexGrow={1} 
         flexDirection="row"
-        overflow="hidden"
       >
         {/* Main chat content */}
         <Box 
@@ -487,17 +489,8 @@ export const App: React.FC = () => {
         >
         {showLogo && <Logo />}
 
-        {/* Scroll indicator */}
-        {(canScrollUp || canScrollDown) && (
-          <Text color="gray" dimColor>
-            {canScrollUp ? '↑ ' : '  '}Scroll with ↑↓ / PgUp/PgDn / Home/End {canScrollDown ? '↓' : ''}
-          </Text>
-        )}
-
         <Box flexDirection="column">
-          {visibleMessages.map((msg, index) => {
-            const realIndex = scrollOffset + index;
-
+          {messages.map((msg, realIndex) => {
             if (msg.type === 'user') {
               return (
                 <Box key={realIndex} marginBottom={1}>
@@ -555,16 +548,11 @@ export const App: React.FC = () => {
           {isThinking && <ThinkingSpinner />}
         </Box>
         </Box>
-      </Box>
 
-      {/* Scroll position (Grok Build style) */}
-      {(canScrollUp || canScrollDown) && (
-        <Box paddingX={1} justifyContent="flex-end">
-          <Text color="gray" dimColor>
-            {scrollOffset + 1}/{messages.length}{canScrollUp ? ' ↑' : ''}{canScrollDown ? ' ↓' : ''}
-          </Text>
-        </Box>
-      )}
+        {showTodoRail && (
+          <TodoRail plan={plan} />
+        )}
+      </Box>
 
       {/* Command suggestions */}
       {suggestions.length > 0 && (
@@ -629,7 +617,7 @@ export const App: React.FC = () => {
       {/* Very subtle status line */}
       <Box paddingX={1} flexDirection="row">
         <Text color="gray" dimColor>
-          /help • ↑↓ scroll • Ctrl+C exit
+          /help • Ctrl+T todo • Ctrl+C exit
         </Text>
         {isPlanMode && (
           <Text color="green"> • PLAN MODE</Text>
@@ -638,4 +626,89 @@ export const App: React.FC = () => {
     </Box>
   );
 };
+
+const Header: React.FC<{
+  provider: string;
+  model: string;
+  usage: Usage;
+  totalTokens: number;
+  planMode: boolean;
+}> = ({ provider, model, usage, totalTokens, planMode }) => (
+  <Box
+    borderStyle="single"
+    borderColor={planMode ? 'green' : 'gray'}
+    paddingX={1}
+    flexDirection="row"
+    justifyContent="space-between"
+  >
+    <Box flexDirection="row">
+      <Text color="cyanBright" bold>ZERO</Text>
+      <Text color="gray" dimColor> local agent</Text>
+      {planMode && <Text color="green"> • PLAN</Text>}
+    </Box>
+    <Box flexDirection="row">
+      <Text color="cyan">{provider}</Text>
+      <Text color="gray"> / </Text>
+      <Text color="magenta">{model}</Text>
+      <Text color="gray" dimColor>
+        {' '}• p:{usage.promptTokens} c:{usage.completionTokens} t:{totalTokens}
+      </Text>
+    </Box>
+  </Box>
+);
+
+const TodoRail: React.FC<{ plan: PlanItem[] }> = ({ plan }) => (
+  <Box
+    width={34}
+    flexShrink={0}
+    flexDirection="column"
+    borderStyle="single"
+    borderColor="gray"
+    paddingX={1}
+  >
+    <Text color="green" bold>todo</Text>
+    {plan.length === 0 ? (
+      <Text color="gray" dimColor>No active plan yet.</Text>
+    ) : (
+      plan.map((item, index) => (
+        <Box key={item.id || index} flexDirection="column" marginTop={1}>
+          <Text color={planStatusColor(item.status)}>
+            {index + 1}. {planStatusMark(item.status)} {item.content}
+          </Text>
+          {item.notes && (
+            <Text color="gray" dimColor>
+              {'   '}{item.notes}
+            </Text>
+          )}
+        </Box>
+      ))
+    )}
+  </Box>
+);
+
+function planStatusMark(status: PlanItem['status']): string {
+  switch (status) {
+    case 'completed':
+      return '✓';
+    case 'in_progress':
+      return '›';
+    case 'failed':
+      return '!';
+    default:
+      return '○';
+  }
+}
+
+function planStatusColor(status: PlanItem['status']): 'green' | 'yellow' | 'red' | 'gray' {
+  switch (status) {
+    case 'completed':
+      return 'green';
+    case 'in_progress':
+      return 'yellow';
+    case 'failed':
+      return 'red';
+    default:
+      return 'gray';
+  }
+}
 

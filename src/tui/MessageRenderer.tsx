@@ -22,7 +22,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ content }) => 
     matches.push({
       index: match.index,
       lang: match[1] || 'text',
-      code: match[2].trim(),
+      code: (match[2] ?? '').trim(),
       fullMatch: match[0],
     });
   }
@@ -34,6 +34,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ content }) => 
 
       for (let i = 0; i < matches.length; i++) {
         const m = matches[i];
+        if (!m) continue;
         try {
           const ansi = await highlightCode(m.code, m.lang);
           newHighlights.set(i, ansi);
@@ -52,6 +53,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({ content }) => 
 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
+    if (!m) continue;
 
     // Add text before this code block (with paragraph formatting)
     if (m.index > lastIndex) {

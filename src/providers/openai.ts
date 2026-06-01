@@ -7,6 +7,35 @@ interface OpenAIProviderOptions {
   model: string;
 }
 
+function isUnsupportedStreamOptionsError(error: unknown): boolean {
+  const candidate = error as {
+    status?: number;
+    code?: string;
+    message?: string;
+    error?: {
+      code?: string;
+      message?: string;
+    };
+  };
+
+  const statusAllowsRetry = candidate.status === 400 || candidate.status === 422;
+  const errorText = [
+    candidate.code,
+    candidate.message,
+    candidate.error?.code,
+    candidate.error?.message,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return statusAllowsRetry && (
+    errorText.includes('stream_options') ||
+    errorText.includes('stream options') ||
+    errorText.includes('include_usage') ||
+    errorText.includes('unknown parameter') ||
+    errorText.includes('unsupported parameter') ||
+    errorText.includes('unrecognized')
+  );
+}
+
 export class OpenAIProvider implements Provider {
   private client: OpenAI;
   private model: string;
@@ -48,23 +77,31 @@ export class OpenAIProvider implements Provider {
         }))
       : undefined;
 
+    const createStreamRequest = (includeUsage: boolean) => ({
+      model: this.model,
+      messages: openaiMessages as any,
+      tools: openaiTools,
+      stream: true as const,
+      ...(includeUsage ? {
+        stream_options: {
+          include_usage: true,
+        },
+      } : {}),
+    });
+
     let stream;
     try {
-      stream = await this.client.chat.completions.create({
-        model: this.model,
-        messages: openaiMessages as any,
-        tools: openaiTools,
-        stream: true,
-      });
-    } catch (err: any) {
-      const message = getDetailedErrorMessage(err);
-      if (message.includes('401') || message.toLowerCase().includes('invalid') || message.toLowerCase().includes('unauthorized')) {
-        throw new Error(`Provider authentication error (check your API key): ${message}`);
+      stream = await this.client.chat.completions.create(createStreamRequest(true));
+    } catch (error) {
+      if (isUnsupportedStreamOptionsError(error)) {
+        try {
+          stream = await this.client.chat.completions.create(createStreamRequest(false));
+        } catch (retryError) {
+          throw formatProviderCreateError(retryError);
+        }
+      } else {
+        throw formatProviderCreateError(error);
       }
-      if (message.toLowerCase().includes('rate') || message.toLowerCase().includes('quota')) {
-        throw new Error(`Provider rate limit error: ${message}`);
-      }
-      throw new Error(`Provider returned error: ${message}`);
     }
 
     const toolCallAccumulators = new Map<number, { 
@@ -155,36 +192,50 @@ export class OpenAIProvider implements Provider {
       }
 
       yield { type: 'done' };
-    } catch (err: any) {
-      const message = getDetailedErrorMessage(err);
+    } catch (error) {
+      const message = getDetailedErrorMessage(error);
       throw new Error(`Provider returned error during streaming: ${message}`);
     }
   }
 }
 
-function getDetailedErrorMessage(err: any): string {
-  if (!err) return 'Unknown error';
+function formatProviderCreateError(error: unknown): Error {
+  const message = getDetailedErrorMessage(error);
+  const lower = message.toLowerCase();
+
+  if (message.includes('401') || lower.includes('invalid') || lower.includes('unauthorized')) {
+    return new Error(`Provider authentication error (check your API key): ${message}`);
+  }
+
+  if (lower.includes('rate') || lower.includes('quota')) {
+    return new Error(`Provider rate limit error: ${message}`);
+  }
+
+  return new Error(`Provider returned error: ${message}`);
+}
+
+function getDetailedErrorMessage(error: any): string {
+  if (!error) return 'Unknown error';
 
   // Try common places where real error lives (especially for custom gateways)
-  if (err.message && !err.message.includes('Provider returned error')) {
-    return err.message;
+  if (error.message && !error.message.includes('Provider returned error')) {
+    return error.message;
   }
 
-  if (err.error) {
-    if (typeof err.error === 'string') return err.error;
-    if (err.error.message) return err.error.message;
-    try { return JSON.stringify(err.error); } catch {}
+  if (error.error) {
+    if (typeof error.error === 'string') return error.error;
+    if (error.error.message) return error.error.message;
+    try { return JSON.stringify(error.error); } catch {}
   }
 
-  if (err.response?.data) {
-    const data = err.response.data;
+  if (error.response?.data) {
+    const data = error.response.data;
     if (data.error?.message) return data.error.message;
     if (typeof data.error === 'string') return data.error;
     try { return JSON.stringify(data); } catch {}
   }
 
-  if (err.cause?.message) return err.cause.message;
+  if (error.cause?.message) return error.cause.message;
 
-  return err.message || String(err);
+  return error.message || String(error);
 }
-

@@ -2,7 +2,7 @@ import type { Provider } from '../providers/types';
 import type { ToolCall, ToolResult } from '../tools/types';
 import { toolRegistry } from '../tools';
 import { DEFAULT_SYSTEM_PROMPT, PLAN_MODE_SYSTEM_PROMPT } from './prompts';
-import { clearPlan } from '../tools/plan';
+import { clearPlan, getCurrentPlan, type PlanItem } from '../tools/plan';
 import { z } from 'zod';
 
 export interface AgentOptions {
@@ -10,6 +10,8 @@ export interface AgentOptions {
   onText?: (text: string) => void;
   onToolCall?: (toolCall: ToolCall) => void;
   onToolResult?: (result: ToolResult) => void;
+  onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
+  onPlanUpdate?: (plan: PlanItem[]) => void;
   toolsEnabled?: boolean;   // allows temporarily disabling tool calling for debugging
   debug?: boolean;          // when true, logs the exact payload sent to the provider
   planMode?: boolean;       // when true, the agent plans without modifying the codebase
@@ -31,6 +33,8 @@ export async function runAgent(
     onText, 
     onToolCall, 
     onToolResult,
+    onUsage,
+    onPlanUpdate,
     toolsEnabled = true,
     debug = false,
     planMode = false
@@ -38,6 +42,7 @@ export async function runAgent(
 
   // Clear any previous plan when starting a new task
   clearPlan();
+  onPlanUpdate?.(getCurrentPlan());
 
   const systemPrompt = planMode ? PLAN_MODE_SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT;
 
@@ -95,7 +100,7 @@ export async function runAgent(
         
         // Show a sample of the schema for the first tool (very useful for debugging)
         const firstTool = toolDefinitions[0];
-        if (firstTool.parameters) {
+        if (firstTool?.parameters) {
           const schemaPreview = JSON.stringify(firstTool.parameters, null, 2).slice(0, 300);
           console.log(`│ First tool schema sample:\n${schemaPreview}...`);
         }
@@ -111,6 +116,13 @@ export async function runAgent(
       if (event.type === 'text') {
         currentText += event.content;
         if (onText) onText(event.content);
+      }
+
+      if (event.type === 'usage') {
+        onUsage?.({
+          promptTokens: event.promptTokens,
+          completionTokens: event.completionTokens,
+        });
       }
 
       if (event.type === 'tool-call-start') {
@@ -187,6 +199,10 @@ export async function runAgent(
 
       if (onToolResult) {
         onToolResult({ toolCallId: tc.id, result });
+      }
+
+      if (tc.name === 'update_plan') {
+        onPlanUpdate?.(getCurrentPlan());
       }
 
       return { toolCallId: tc.id, result };

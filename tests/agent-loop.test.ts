@@ -85,4 +85,33 @@ describe('runAgent tool-call flow', () => {
     expect(answer).toBe('just an answer');
     expect(provider.received).toHaveLength(1);
   });
+
+  it('reports usage and plan updates through callbacks', async () => {
+    const provider = new MockProvider([
+      [
+        { type: 'usage', promptTokens: 10, completionTokens: 2 },
+        { type: 'tool-call-start', id: 'call_1', name: 'update_plan' },
+        {
+          type: 'tool-call-delta',
+          id: 'call_1',
+          argumentsFragment: JSON.stringify({
+            plan: [{ id: '1', content: 'track this', status: 'in_progress' }],
+          }),
+        },
+        { type: 'tool-call-end', id: 'call_1' },
+      ],
+      [{ type: 'text', content: 'done' }],
+    ]);
+
+    const usageEvents: Array<{ promptTokens: number; completionTokens: number }> = [];
+    const planSnapshots: string[][] = [];
+
+    await runAgent('make a plan', provider, {
+      onUsage: (usage) => usageEvents.push(usage),
+      onPlanUpdate: (plan) => planSnapshots.push(plan.map((item) => item.content)),
+    });
+
+    expect(usageEvents).toEqual([{ promptTokens: 10, completionTokens: 2 }]);
+    expect(planSnapshots).toEqual([[], ['track this']]);
+  });
 });

@@ -136,9 +136,11 @@ export const AddProvider: React.FC<AddProviderProps> = ({ onDone, onCancel }) =>
             </Text>
           )}
 
-          <Text marginTop={1} color={selectedOption === 1 ? 'greenBright' : 'white'}>
-            {selectedOption === 1 ? '› ' : '  '}2. Add custom OpenAI-compatible provider
-          </Text>
+          <Box marginTop={1}>
+            <Text color={selectedOption === 1 ? 'greenBright' : 'white'}>
+              {selectedOption === 1 ? '› ' : '  '}2. Add custom OpenAI-compatible provider
+            </Text>
+          </Box>
           {selectedOption === 1 && (
             <Text color="gray" dimColor>
               {'   '}For Groq, OpenAI, Ollama, etc.
