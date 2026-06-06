@@ -25,6 +25,7 @@ const (
 	commandSearch
 	commandResume
 	commandCompact
+	commandRewind
 	commandEffort
 	commandStyle
 	commandTheme
@@ -134,6 +135,13 @@ var commandDefinitions = []commandDefinition{
 		group:       commandGroupSession,
 		description: "Show or request transcript compaction state.",
 		kind:        commandCompact,
+	},
+	{
+		name:        "/rewind",
+		usage:       "/rewind [latest|<sequence>]",
+		group:       commandGroupSession,
+		description: "Restore workspace files to a checkpoint and truncate the session.",
+		kind:        commandRewind,
 	},
 	{
 		name:        "/effort",

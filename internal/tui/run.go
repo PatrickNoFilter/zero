@@ -20,12 +20,16 @@ func Run(ctx context.Context, options Options) int {
 		}
 	}
 
-	program = tea.NewProgram(
-		newModel(ctx, options),
+	programOpts := []tea.ProgramOption{
 		tea.WithContext(ctx),
 		tea.WithInput(os.Stdin),
 		tea.WithOutput(os.Stdout),
-	)
+	}
+	if options.Skin == "zenline" {
+		// enable mouse so the centered permission modal buttons are clickable
+		programOpts = append(programOpts, tea.WithMouseCellMotion())
+	}
+	program = tea.NewProgram(newModel(ctx, options), programOpts...)
 
 	if _, err := program.Run(); err != nil {
 		return 1

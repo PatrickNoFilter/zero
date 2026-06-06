@@ -739,3 +739,121 @@ func writeAgentTestFile(t *testing.T, path string, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunRetriesOnDroppedToolCall(t *testing.T) {
+	provider := &mockProvider{
+		turns: [][]zeroruntime.StreamEvent{
+			{
+				{Type: zeroruntime.StreamEventText, Content: "Let me write the files."},
+				{Type: zeroruntime.StreamEventToolCallDropped},
+				{Type: zeroruntime.StreamEventDone},
+			},
+			{
+				{Type: zeroruntime.StreamEventText, Content: "All done."},
+				{Type: zeroruntime.StreamEventDone},
+			},
+		},
+	}
+
+	result, err := Run(context.Background(), "build it", provider, Options{Registry: tools.NewRegistry()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected the loop to retry (2 turns), got %d", len(provider.requests))
+	}
+	if result.FinalAnswer != "All done." {
+		t.Fatalf("expected final answer from retry turn, got %q", result.FinalAnswer)
+	}
+	// The retry turn must carry synthetic feedback to the model.
+	var fedback bool
+	for _, m := range provider.requests[1].Messages {
+		if m.Role == zeroruntime.MessageRoleUser && strings.Contains(strings.ToLower(m.Content), "tool name") {
+			fedback = true
+		}
+	}
+	if !fedback {
+		t.Fatalf("expected a synthetic tool-error message on the retry turn, messages: %+v", provider.requests[1].Messages)
+	}
+}
+
+type secretEmittingTool struct{ output string }
+
+func (t secretEmittingTool) Name() string        { return "leak" }
+func (t secretEmittingTool) Description() string  { return "emits text for testing" }
+func (t secretEmittingTool) Parameters() tools.Schema {
+	return tools.Schema{Type: "object", AdditionalProperties: false}
+}
+func (t secretEmittingTool) Safety() tools.Safety {
+	return tools.Safety{SideEffect: tools.SideEffectRead, Permission: tools.PermissionAllow}
+}
+func (t secretEmittingTool) Run(_ context.Context, _ map[string]any) tools.Result {
+	return tools.Result{Status: tools.StatusOK, Output: t.output}
+}
+
+func TestRunScrubsSecretsFromToolOutput(t *testing.T) {
+	secret := "sk-proj-ABCDEFGHIJKLMNOP1234567890"
+	registry := tools.NewRegistry()
+	registry.Register(secretEmittingTool{output: "the token is " + secret + " ok"})
+
+	provider := &mockProvider{turns: [][]zeroruntime.StreamEvent{
+		{
+			{Type: zeroruntime.StreamEventToolCallStart, ToolCallID: "c1", ToolName: "leak"},
+			{Type: zeroruntime.StreamEventToolCallEnd, ToolCallID: "c1"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+		{
+			{Type: zeroruntime.StreamEventText, Content: "done"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+	}}
+
+	var captured ToolResult
+	_, err := Run(context.Background(), "go", provider, Options{
+		Registry:     registry,
+		OnToolResult: func(r ToolResult) { captured = r },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(captured.Output, secret) {
+		t.Fatalf("secret leaked into tool result output: %q", captured.Output)
+	}
+	if !captured.Redacted {
+		t.Error("expected Redacted=true when a secret was scrubbed")
+	}
+	if !strings.Contains(strings.ToLower(captured.Output), "redacted") {
+		t.Errorf("expected a redaction reminder, got %q", captured.Output)
+	}
+	if len(provider.requests) < 2 {
+		t.Fatalf("expected a second turn carrying the tool result")
+	}
+	for _, m := range provider.requests[1].Messages {
+		if strings.Contains(m.Content, secret) {
+			t.Fatalf("secret leaked into model message: %q", m.Content)
+		}
+	}
+}
+
+func TestRunDoesNotFlagCleanToolOutput(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(secretEmittingTool{output: "perfectly ordinary output"})
+	provider := &mockProvider{turns: [][]zeroruntime.StreamEvent{
+		{
+			{Type: zeroruntime.StreamEventToolCallStart, ToolCallID: "c1", ToolName: "leak"},
+			{Type: zeroruntime.StreamEventToolCallEnd, ToolCallID: "c1"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+		{{Type: zeroruntime.StreamEventText, Content: "done"}, {Type: zeroruntime.StreamEventDone}},
+	}}
+	var captured ToolResult
+	if _, err := Run(context.Background(), "go", provider, Options{Registry: registry, OnToolResult: func(r ToolResult) { captured = r }}); err != nil {
+		t.Fatal(err)
+	}
+	if captured.Redacted {
+		t.Error("clean output should not be flagged Redacted")
+	}
+	if strings.Contains(strings.ToLower(captured.Output), "redacted") {
+		t.Errorf("clean output should not get a reminder, got %q", captured.Output)
+	}
+}

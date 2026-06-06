@@ -285,6 +285,7 @@ func TestPromptSubmitPersistsPermissionSessionEvents(t *testing.T) {
 	if got := eventTypes(events); !equalEventTypes(got, []sessions.EventType{
 		sessions.EventMessage,
 		sessions.EventToolCall,
+		sessions.EventSessionCheckpoint,
 		sessions.EventPermissionRequest,
 		sessions.EventPermissionDecision,
 		sessions.EventToolResult,
@@ -292,15 +293,15 @@ func TestPromptSubmitPersistsPermissionSessionEvents(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected event sequence: %#v", got)
 	}
-	assertPayloadField(t, events[2], "toolCallId", "call_write")
-	assertPayloadField(t, events[2], "name", "write_file")
-	assertPayloadField(t, events[2], "action", "prompt")
-	assertPayloadField(t, events[2], "permission", "prompt")
-	assertPayloadField(t, events[2], "permissionMode", "ask")
-	assertPayloadField(t, events[2], "sideEffect", "write")
-	assertPayloadField(t, events[3], "action", "deny")
-	assertPayloadField(t, events[3], "decisionReason", "denied in TUI")
-	assertPayloadField(t, events[5], "content", "write blocked")
+	assertPayloadField(t, events[3], "toolCallId", "call_write")
+	assertPayloadField(t, events[3], "name", "write_file")
+	assertPayloadField(t, events[3], "action", "prompt")
+	assertPayloadField(t, events[3], "permission", "prompt")
+	assertPayloadField(t, events[3], "permissionMode", "ask")
+	assertPayloadField(t, events[3], "sideEffect", "write")
+	assertPayloadField(t, events[4], "action", "deny")
+	assertPayloadField(t, events[4], "decisionReason", "denied in TUI")
+	assertPayloadField(t, events[6], "content", "write blocked")
 	if !transcriptContains(next.transcript, "permission: write_file prompt") {
 		t.Fatalf("expected permission row in transcript, got %#v", next.transcript)
 	}
@@ -334,6 +335,7 @@ func TestPermissionPromptAllowWritesFileAndRecordsDecision(t *testing.T) {
 	if got := eventTypes(events); !equalEventTypes(got, []sessions.EventType{
 		sessions.EventMessage,
 		sessions.EventToolCall,
+		sessions.EventSessionCheckpoint,
 		sessions.EventPermissionRequest,
 		sessions.EventPermissionDecision,
 		sessions.EventToolResult,
@@ -341,10 +343,10 @@ func TestPermissionPromptAllowWritesFileAndRecordsDecision(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected event sequence: %#v", got)
 	}
-	assertPayloadField(t, events[3], "action", "allow")
-	assertPayloadField(t, events[3], "decisionReason", "approved in TUI")
-	assertPayloadField(t, events[4], "status", "ok")
-	assertPayloadField(t, events[5], "content", "write allowed")
+	assertPayloadField(t, events[4], "action", "allow")
+	assertPayloadField(t, events[4], "decisionReason", "approved in TUI")
+	assertPayloadField(t, events[5], "status", "ok")
+	assertPayloadField(t, events[6], "content", "write allowed")
 	if !transcriptContains(next.transcript, "permission: write_file allow") {
 		t.Fatalf("expected allow decision in transcript, got %#v", next.transcript)
 	}

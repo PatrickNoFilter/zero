@@ -36,11 +36,14 @@ const (
 )
 
 type ToolResult struct {
-	ToolCallID string
-	Name       string
-	Status     tools.Status
-	Output     string
-	Meta       map[string]string
+	ToolCallID   string
+	Name         string
+	Status       tools.Status
+	Output       string
+	Meta         map[string]string
+	Redacted     bool
+	ChangedFiles []string
+	Display      tools.Display
 }
 
 type PermissionRequest struct {

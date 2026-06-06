@@ -37,3 +37,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 /zero
 /zero.exe
+
+# local launcher with API key — never commit
+start-zenline.sh

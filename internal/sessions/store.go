@@ -32,6 +32,7 @@ const (
 	EventProviderUsage      EventType = "provider_usage"
 	EventUsage              EventType = EventProviderUsage
 	EventError              EventType = "error"
+	EventSessionCheckpoint  EventType = "session_checkpoint"
 	EventSessionRewind      EventType = "session_rewind"
 	EventCompaction         EventType = "session_compaction"
 	EventSessionFork        EventType = "session_fork"

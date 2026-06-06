@@ -90,5 +90,9 @@ func (tool editFileTool) Run(_ context.Context, args map[string]any) Result {
 	if replacedCount != 1 {
 		suffix = "s"
 	}
-	return okResult(fmt.Sprintf("Successfully edited %s (replaced %d occurrence%s).", relativePath, replacedCount, suffix))
+	summary := fmt.Sprintf("Successfully edited %s (replaced %d occurrence%s).", relativePath, replacedCount, suffix)
+	result := okResult(summary)
+	result.ChangedFiles = []string{relativePath}
+	result.Display = Display{Summary: fmt.Sprintf("Edited %s", relativePath), Kind: "diff"}
+	return result
 }

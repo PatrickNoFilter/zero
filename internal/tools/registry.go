@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 
+	"github.com/Gitlawb/zero/internal/redaction"
 	"github.com/Gitlawb/zero/internal/sandbox"
 )
 
@@ -109,11 +110,24 @@ func (registry *Registry) RunWithOptions(ctx context.Context, name string, args 
 		if sandboxed, ok := tool.(sandboxAwareTool); ok {
 			res := sandboxed.RunWithSandbox(ctx, args, options.Sandbox)
 			res.SandboxDecision = sandboxDecision
-			return res
+			return scrubResultSecrets(res)
 		}
 	}
 	res := tool.Run(ctx, args)
 	res.SandboxDecision = sandboxDecision
+	return scrubResultSecrets(res)
+}
+
+// scrubResultSecrets removes secret-shaped tokens from a tool's output at the
+// registry boundary — the single point every caller (agent loop AND MCP server)
+// passes through. RedactString substitutes "[REDACTED]" inline, so the inline
+// markers plus the Redacted flag are the signal; no free-text marker is appended
+// (that would risk double-marking and ambiguity with legitimate output).
+func scrubResultSecrets(res Result) Result {
+	if scrubbed := redaction.RedactString(res.Output, redaction.Options{}); scrubbed != res.Output {
+		res.Output = scrubbed
+		res.Redacted = true
+	}
 	return res
 }
 

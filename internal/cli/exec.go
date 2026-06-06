@@ -217,6 +217,10 @@ func runExec(args []string, stdout io.Writer, stderr io.Writer, deps appDeps) in
 				"name":      call.Name,
 				"arguments": call.Arguments,
 			})
+			// Snapshot before-state of files this call will mutate (safe rewind).
+			if checkpoint, ok := sessionRecorder.captureCheckpoint(workspaceRoot, call); ok {
+				writer.checkpoint(checkpoint)
+			}
 		},
 		OnPermission: func(event agent.PermissionEvent) {
 			writer.permission(event)
@@ -232,6 +236,12 @@ func runExec(args []string, stdout io.Writer, stderr io.Writer, deps appDeps) in
 			}
 			if len(result.Meta) > 0 {
 				payload["meta"] = result.Meta
+			}
+			if result.Redacted {
+				payload["redacted"] = true
+			}
+			if len(result.ChangedFiles) > 0 {
+				payload["changedFiles"] = result.ChangedFiles
 			}
 			sessionRecorder.append(sessions.EventToolResult, payload)
 		},

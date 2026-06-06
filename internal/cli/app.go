@@ -176,6 +176,8 @@ func runWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps appDeps
 		return runChanges(args[1:], stdout, stderr, deps)
 	case "serve":
 		return runServe(args[1:], stdout, stderr, deps)
+	case "zenline":
+		return runZenline(args[1:], stdout, stderr, deps)
 	default:
 		if _, err := fmt.Fprintf(stderr, "unknown command %q\n", args[0]); err != nil {
 			return 1
@@ -256,6 +258,10 @@ func fillAppDeps(deps appDeps) appDeps {
 }
 
 func runInteractiveTUI(stderr io.Writer, deps appDeps) int {
+	return runInteractiveTUIWithSkin(stderr, deps, "")
+}
+
+func runInteractiveTUIWithSkin(stderr io.Writer, deps appDeps, skin string) int {
 	workspaceRoot, err := deps.getwd()
 	if err != nil {
 		return writeAppError(stderr, "failed to resolve workspace: "+err.Error(), 1)
@@ -306,6 +312,8 @@ func runInteractiveTUI(stderr io.Writer, deps appDeps) int {
 			Sandbox:        sandboxEngine,
 		},
 		PermissionMode: permissionMode,
+		Skin:           skin,
+		ThemeDark:      true,
 	})
 }
 

@@ -11,11 +11,17 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Gitlawb/zero/internal/zeroruntime"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
+
+// defaultStreamIdleTimeout aborts a streaming read when the upstream goes silent
+// without closing the connection. Hosted gateways (e.g. Ollama Cloud) sometimes
+// stall mid-stream after a tool-call delta; without this the agent blocks forever.
+const defaultStreamIdleTimeout = 90 * time.Second
 
 // Options configures an OpenAI-compatible chat completions provider.
 type Options struct {
@@ -24,15 +30,19 @@ type Options struct {
 	Model      string
 	HTTPClient *http.Client
 	UserAgent  string
+	// StreamIdleTimeout aborts the stream if no data arrives for this long.
+	// Zero uses defaultStreamIdleTimeout.
+	StreamIdleTimeout time.Duration
 }
 
 // Provider streams completions from an OpenAI-compatible chat completions API.
 type Provider struct {
-	apiKey     string
-	baseURL    string
-	model      string
-	httpClient *http.Client
-	userAgent  string
+	apiKey            string
+	baseURL           string
+	model             string
+	httpClient        *http.Client
+	userAgent         string
+	streamIdleTimeout time.Duration
 }
 
 // New creates an OpenAI-compatible provider.
@@ -56,12 +66,18 @@ func New(options Options) (*Provider, error) {
 		httpClient = http.DefaultClient
 	}
 
+	idleTimeout := options.StreamIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultStreamIdleTimeout
+	}
+
 	return &Provider{
-		apiKey:     options.APIKey,
-		baseURL:    baseURL,
-		model:      model,
-		httpClient: httpClient,
-		userAgent:  options.UserAgent,
+		apiKey:            options.APIKey,
+		baseURL:           baseURL,
+		model:             model,
+		httpClient:        httpClient,
+		userAgent:         options.UserAgent,
+		streamIdleTimeout: idleTimeout,
 	}, nil
 }
 
@@ -86,23 +102,46 @@ func (provider *Provider) StreamCompletion(
 
 func (provider *Provider) stream(ctx context.Context, body []byte, events chan<- zeroruntime.StreamEvent) {
 	endpoint := provider.baseURL + "/chat/completions"
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider request error: " + err.Error())})
-		return
-	}
-	request.Header.Set("Content-Type", "application/json")
-	if provider.userAgent != "" {
-		request.Header.Set("User-Agent", provider.userAgent)
-	}
-	if provider.apiKey != "" {
-		request.Header.Set("Authorization", "Bearer "+provider.apiKey)
-	}
 
-	response, err := provider.httpClient.Do(request)
-	if err != nil {
-		sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
-		return
+	// streamCtx lets the idle watchdog abort an in-flight body read by cancelling
+	// the request, rather than closing response.Body directly (which would race
+	// with the deferred Close below). Cancelling unblocks the reader goroutine.
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+
+	// Retry transient failures (network errors and 5xx) before surfacing them.
+	// Hosted OpenAI-compatible gateways (e.g. Ollama Cloud) return intermittent
+	// 500s that succeed on a quick retry.
+	const maxAttempts = 3
+	var response *http.Response
+	for attempt := 1; ; attempt++ {
+		request, err := http.NewRequestWithContext(streamCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider request error: " + err.Error())})
+			return
+		}
+		request.Header.Set("Content-Type", "application/json")
+		if provider.userAgent != "" {
+			request.Header.Set("User-Agent", provider.userAgent)
+		}
+		if provider.apiKey != "" {
+			request.Header.Set("Authorization", "Bearer "+provider.apiKey)
+		}
+
+		resp, err := provider.httpClient.Do(request)
+		if err != nil {
+			if attempt < maxAttempts && ctx.Err() == nil && backoff(ctx, attempt) {
+				continue
+			}
+			sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
+			return
+		}
+		if resp.StatusCode >= http.StatusInternalServerError && attempt < maxAttempts && backoff(ctx, attempt) {
+			_ = resp.Body.Close()
+			continue
+		}
+		response = resp
+		break
 	}
 	defer func() {
 		_ = response.Body.Close()
@@ -116,51 +155,100 @@ func (provider *Provider) stream(ctx context.Context, body []byte, events chan<-
 	state := newToolState()
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 0, 4096), 16*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" {
-			continue
-		}
-		if data == "[DONE]" {
-			state.closeOpen(ctx, events)
-			sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventDone})
-			return
-		}
 
-		var chunk streamChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+	// Read SSE lines on a dedicated goroutine so the consumer below can enforce
+	// an idle deadline with a select. The reader exits when the body EOFs/errors
+	// or when streamCtx is cancelled (idle abort), then closes lines.
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		for scanner.Scan() {
+			select {
+			case lines <- scanner.Text():
+			case <-streamCtx.Done():
+				return
+			}
+		}
+	}()
+
+	idle := time.NewTimer(provider.streamIdleTimeout)
+	defer idle.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			state.closeOpen(ctx, events)
+			sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + ctx.Err().Error())})
+			return
+		case <-idle.C:
+			// Upstream went silent without closing. Abort the read and surface a
+			// timeout instead of blocking the agent forever.
+			cancelStream()
 			state.closeOpen(ctx, events)
 			sendEvent(ctx, events, zeroruntime.StreamEvent{
 				Type:  zeroruntime.StreamEventError,
-				Error: provider.redact("provider stream error: malformed JSON: " + err.Error()),
+				Error: provider.redact(fmt.Sprintf("provider stream error: idle timeout after %s (upstream stopped sending data)", provider.streamIdleTimeout)),
 			})
 			return
-		}
-		if chunk.Error != nil {
-			state.closeOpen(ctx, events)
-			sendEvent(ctx, events, zeroruntime.StreamEvent{
-				Type:  zeroruntime.StreamEventError,
-				Error: provider.classifiedError(http.StatusInternalServerError, chunk.Error.Message),
-			})
-			return
-		}
-		provider.emitChunk(ctx, chunk, state, events)
-	}
+		case raw, ok := <-lines:
+			if !ok {
+				// Reader finished: EOF, scanner error, or context cancel.
+				state.closeOpen(ctx, events)
+				if err := scanner.Err(); err != nil {
+					sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
+					return
+				}
+				if err := ctx.Err(); err != nil {
+					sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
+					return
+				}
+				sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventDone})
+				return
+			}
 
-	state.closeOpen(ctx, events)
-	if err := scanner.Err(); err != nil {
-		sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
-		return
+			// Any line is activity: refresh the idle deadline.
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(provider.streamIdleTimeout)
+
+			line := strings.TrimSpace(raw)
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if data == "" {
+				continue
+			}
+			if data == "[DONE]" {
+				state.closeOpen(ctx, events)
+				sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventDone})
+				return
+			}
+
+			var chunk streamChunk
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				state.closeOpen(ctx, events)
+				sendEvent(ctx, events, zeroruntime.StreamEvent{
+					Type:  zeroruntime.StreamEventError,
+					Error: provider.redact("provider stream error: malformed JSON: " + err.Error()),
+				})
+				return
+			}
+			if chunk.Error != nil {
+				state.closeOpen(ctx, events)
+				sendEvent(ctx, events, zeroruntime.StreamEvent{
+					Type:  zeroruntime.StreamEventError,
+					Error: provider.classifiedError(http.StatusInternalServerError, chunk.Error.Message),
+				})
+				return
+			}
+			provider.emitChunk(ctx, chunk, state, events)
+		}
 	}
-	if err := ctx.Err(); err != nil {
-		sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventError, Error: provider.redact("provider stream error: " + err.Error())})
-		return
-	}
-	sendEvent(ctx, events, zeroruntime.StreamEvent{Type: zeroruntime.StreamEventDone})
 }
 
 func (provider *Provider) emitChunk(
@@ -241,6 +329,19 @@ func (provider *Provider) redact(message string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+// backoff waits before a retry attempt, returning false if the context is
+// cancelled while waiting.
+func backoff(ctx context.Context, attempt int) bool {
+	timer := time.NewTimer(time.Duration(attempt) * 400 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func sendEvent(ctx context.Context, events chan<- zeroruntime.StreamEvent, event zeroruntime.StreamEvent) {

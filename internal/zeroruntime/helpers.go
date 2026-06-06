@@ -4,10 +4,11 @@ import "context"
 
 // CollectedStream is the non-streaming summary of provider events.
 type CollectedStream struct {
-	Text      string
-	ToolCalls []ToolCall
-	Usage     Usage
-	Error     string
+	Text             string
+	ToolCalls        []ToolCall
+	Usage            Usage
+	Error            string
+	DroppedToolCalls int // malformed tool calls the provider could not dispatch
 }
 
 // CollectOptions provides callbacks for consumers that need live stream updates.
@@ -61,9 +62,15 @@ func CollectStreamWithOptions(ctx context.Context, events <-chan StreamEvent, op
 				toolCall.Arguments += event.ArgumentsFragment
 			case StreamEventToolCallEnd:
 				if toolCall, ok := pendingToolCalls[event.ToolCallID]; ok {
-					collected.ToolCalls = append(collected.ToolCalls, *toolCall)
+					if toolCall.Name != "" {
+						collected.ToolCalls = append(collected.ToolCalls, *toolCall)
+					} else {
+						collected.DroppedToolCalls++
+					}
 					delete(pendingToolCalls, event.ToolCallID)
 				}
+			case StreamEventToolCallDropped:
+				collected.DroppedToolCalls++
 			case StreamEventUsage:
 				inputTokens := event.Usage.EffectiveInputTokens()
 				outputTokens := event.Usage.EffectiveOutputTokens()
@@ -114,7 +121,13 @@ func appendOpenToolCalls(
 		if !ok {
 			continue
 		}
-		collected.ToolCalls = append(collected.ToolCalls, *toolCall)
+		// Drop malformed (nameless) calls so the agent never tries to dispatch
+		// an empty tool name. A valid call always carries a name from its start event.
+		if toolCall.Name != "" {
+			collected.ToolCalls = append(collected.ToolCalls, *toolCall)
+		} else {
+			collected.DroppedToolCalls++
+		}
 		delete(pendingToolCalls, id)
 	}
 }

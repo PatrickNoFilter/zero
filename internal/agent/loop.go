@@ -71,6 +71,16 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 		})
 
 		if len(collected.ToolCalls) == 0 {
+			// The model intended a tool call but it was malformed and dropped.
+			// Tell it to retry rather than silently treating text as the answer.
+			if collected.DroppedToolCalls > 0 {
+				messages = append(messages, zeroruntime.Message{
+					Role: zeroruntime.MessageRoleUser,
+					Content: "Your previous tool call was malformed (it was missing a tool name) and was not executed. " +
+						"Re-issue the tool call with a valid tool name and JSON arguments, or reply with your final answer.",
+				})
+				continue
+			}
 			result.FinalAnswer = collected.Text
 			result.Messages = copyMessages(messages)
 			return result, nil
@@ -177,12 +187,18 @@ func executeToolCall(ctx context.Context, registry *tools.Registry, call ToolCal
 			options.OnPermission(event)
 		}
 	}
+	// Secret scrubbing happens at the registry boundary (the single point both
+	// the agent loop and the MCP server pass through), so result.Output is
+	// already redacted here and result.Redacted reflects whether it changed.
 	return ToolResult{
-		ToolCallID: call.ID,
-		Name:       call.Name,
-		Status:     result.Status,
-		Output:     result.Output,
-		Meta:       result.Meta,
+		ToolCallID:   call.ID,
+		Name:         call.Name,
+		Status:       result.Status,
+		Output:       result.Output,
+		Meta:         result.Meta,
+		Redacted:     result.Redacted,
+		ChangedFiles: result.ChangedFiles,
+		Display:      result.Display,
 	}
 }
 
@@ -490,6 +506,19 @@ func propertyToRuntimeMap(property tools.PropertySchema) map[string]any {
 	}
 	if property.Maximum != nil {
 		schema["maximum"] = *property.Maximum
+	}
+	if property.Items != nil {
+		schema["items"] = propertyToRuntimeMap(*property.Items)
+	}
+	if len(property.Properties) > 0 {
+		properties := make(map[string]any, len(property.Properties))
+		for name, nested := range property.Properties {
+			properties[name] = propertyToRuntimeMap(nested)
+		}
+		schema["properties"] = properties
+	}
+	if len(property.Required) > 0 {
+		schema["required"] = append([]string{}, property.Required...)
 	}
 	return schema
 }

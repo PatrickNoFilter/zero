@@ -35,9 +35,13 @@ const (
 	StreamEventToolCallStart StreamEventType = "tool-call-start"
 	StreamEventToolCallDelta StreamEventType = "tool-call-delta"
 	StreamEventToolCallEnd   StreamEventType = "tool-call-end"
-	StreamEventUsage         StreamEventType = "usage"
-	StreamEventDone          StreamEventType = "done"
-	StreamEventError         StreamEventType = "error"
+	// StreamEventToolCallDropped signals the model attempted a tool call that
+	// was malformed (no usable name/id) and could not be dispatched. The agent
+	// uses this to ask the model to retry instead of silently ending the turn.
+	StreamEventToolCallDropped StreamEventType = "tool-call-dropped"
+	StreamEventUsage           StreamEventType = "usage"
+	StreamEventDone            StreamEventType = "done"
+	StreamEventError           StreamEventType = "error"
 )
 
 // ToolCall is a normalized assistant request to run a tool.

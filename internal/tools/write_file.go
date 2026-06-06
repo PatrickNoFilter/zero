@@ -72,8 +72,13 @@ func (tool writeFileTool) Run(_ context.Context, args map[string]any) Result {
 		return errorResult("Error writing file " + relativePath + ": " + err.Error())
 	}
 
+	verb := "Created"
 	if existed {
-		return okResult(fmt.Sprintf("Overwrote %s (%d bytes).", relativePath, len([]byte(content))))
+		verb = "Overwrote"
 	}
-	return okResult(fmt.Sprintf("Created %s (%d bytes).", relativePath, len([]byte(content))))
+	summary := fmt.Sprintf("%s %s (%d bytes).", verb, relativePath, len([]byte(content)))
+	result := okResult(summary)
+	result.ChangedFiles = []string{relativePath}
+	result.Display = Display{Summary: summary, Kind: "file"}
+	return result
 }

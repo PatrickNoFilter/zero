@@ -417,3 +417,90 @@ func TestStreamCompletionSkipsNamelessToolCallOnEOF(t *testing.T) {
 		t.Fatalf("events = %#v, want done event", events)
 	}
 }
+
+func TestStreamCompletionIdleTimeoutAbortsStalledStream(t *testing.T) {
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Send one token, then hang without sending [DONE] or closing —
+		// simulating a stalled upstream (the freeze in the screenshot).
+		writeSSE(w, `{"choices":[{"delta":{"content":"hi"}}]}`)
+		select {
+		case <-r.Context().Done():
+		case <-released:
+		}
+	}))
+	defer server.Close()
+	defer close(released)
+
+	provider, err := New(Options{
+		BaseURL:           server.URL + "/",
+		Model:             "gpt-test",
+		StreamIdleTimeout: 80 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	stream, err := provider.StreamCompletion(context.Background(), zeroruntime.CompletionRequest{})
+	if err != nil {
+		t.Fatalf("StreamCompletion returned error: %v", err)
+	}
+
+	// Must terminate (channel closes) rather than hang forever.
+	done := make(chan []zeroruntime.StreamEvent, 1)
+	go func() { done <- readAll(stream) }()
+	var events []zeroruntime.StreamEvent
+	select {
+	case events = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stream did not terminate on idle — it hung")
+	}
+
+	var gotText, gotIdleError bool
+	for _, e := range events {
+		if e.Type == zeroruntime.StreamEventText && e.Content == "hi" {
+			gotText = true
+		}
+		if e.Type == zeroruntime.StreamEventError && strings.Contains(strings.ToLower(e.Error), "idle") {
+			gotIdleError = true
+		}
+	}
+	if !gotText {
+		t.Error("expected the first token before the stall")
+	}
+	if !gotIdleError {
+		t.Errorf("expected a surfaced idle-timeout error, got events: %+v", events)
+	}
+}
+
+func TestStreamCompletionEmitsDroppedOnNamelessToolCall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A tool call with arguments + finish_reason but no function name.
+		writeSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_x","function":{"arguments":"{}"}}]}}]}`)
+		writeSSE(w, `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+		writeSSE(w, `[DONE]`)
+	}))
+	defer server.Close()
+
+	provider, err := New(Options{BaseURL: server.URL + "/", Model: "gpt-test"})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	events := collectProviderEvents(t, provider)
+
+	var dropped, started bool
+	for _, e := range events {
+		if e.Type == zeroruntime.StreamEventToolCallDropped {
+			dropped = true
+		}
+		if e.Type == zeroruntime.StreamEventToolCallStart {
+			started = true
+		}
+	}
+	if started {
+		t.Error("a nameless tool call must not start")
+	}
+	if !dropped {
+		t.Errorf("expected a dropped-tool-call signal, got events: %+v", events)
+	}
+}

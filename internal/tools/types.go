@@ -49,14 +49,32 @@ type PropertySchema struct {
 	Default     any      `json:"default,omitempty"`
 	Minimum     *int     `json:"minimum,omitempty"`
 	Maximum     *int     `json:"maximum,omitempty"`
+	// Items describes array element shape (for Type "array"). Properties/Required
+	// describe nested object fields (for Type "object" or an object Items).
+	Items      *PropertySchema           `json:"items,omitempty"`
+	Properties map[string]PropertySchema `json:"properties,omitempty"`
+	Required   []string                  `json:"required,omitempty"`
 }
 
 type Result struct {
-	Status            Status
-	Output            string
-	Truncated         bool
-	Meta              map[string]string
-	SandboxDecision   *sandbox.Decision `json:"-"`
+	Status          Status
+	Output          string
+	Truncated       bool
+	Meta            map[string]string
+	SandboxDecision *sandbox.Decision `json:"-"`
+	// Redacted is set when secret scrubbing altered Output before it left the
+	// tool-execution boundary.
+	Redacted bool
+	// ChangedFiles lists workspace-relative paths a mutating tool wrote.
+	ChangedFiles []string
+	// Display carries a short, structured summary for the TUI / stream.
+	Display Display
+}
+
+// Display is a compact, structured summary of a tool result for presentation.
+type Display struct {
+	Summary string
+	Kind    string // e.g. file, diff, search, shell
 }
 
 type Tool interface {

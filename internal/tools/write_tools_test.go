@@ -384,3 +384,61 @@ func TestApplyPatchToolRejectsOutsideWorkspace(t *testing.T) {
 		t.Fatalf("expected workspace error, got %q", result.Output)
 	}
 }
+
+func TestWriteFileReportsChangedFileAndDisplay(t *testing.T) {
+	root := t.TempDir()
+	res := NewWriteFileTool(root).Run(context.Background(), map[string]any{"path": "notes.txt", "content": "hello"})
+	if res.Status != StatusOK {
+		t.Fatalf("status=%s output=%s", res.Status, res.Output)
+	}
+	if len(res.ChangedFiles) != 1 || res.ChangedFiles[0] != "notes.txt" {
+		t.Fatalf("ChangedFiles = %v, want [notes.txt]", res.ChangedFiles)
+	}
+	if res.Display.Kind != "file" {
+		t.Errorf("Display.Kind = %q, want file", res.Display.Kind)
+	}
+	if res.Display.Summary == "" {
+		t.Error("expected a non-empty Display.Summary")
+	}
+}
+
+func TestEditFileReportsChangedFileAndDisplay(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("alpha beta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := NewEditFileTool(root).Run(context.Background(), map[string]any{"path": "f.txt", "old_string": "alpha", "new_string": "gamma"})
+	if res.Status != StatusOK {
+		t.Fatalf("status=%s output=%s", res.Status, res.Output)
+	}
+	if len(res.ChangedFiles) != 1 || res.ChangedFiles[0] != "f.txt" {
+		t.Fatalf("ChangedFiles = %v, want [f.txt]", res.ChangedFiles)
+	}
+	if res.Display.Kind != "diff" {
+		t.Errorf("Display.Kind = %q, want diff", res.Display.Kind)
+	}
+}
+
+func TestApplyPatchReportsChangedFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch := "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+two\n"
+	res := NewApplyPatchTool(root).Run(context.Background(), map[string]any{"patch": patch})
+	if res.Status != StatusOK {
+		t.Skipf("git apply unavailable or failed: %s", res.Output) // environment guard
+	}
+	found := false
+	for _, f := range res.ChangedFiles {
+		if f == "a.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a.txt in ChangedFiles, got %v", res.ChangedFiles)
+	}
+	if res.Display.Kind != "diff" {
+		t.Errorf("Display.Kind = %q, want diff", res.Display.Kind)
+	}
+}

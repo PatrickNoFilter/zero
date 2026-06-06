@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/Gitlawb/zero/internal/sessions"
 	"github.com/Gitlawb/zero/internal/tools"
 	"github.com/Gitlawb/zero/internal/usage"
+	"github.com/Gitlawb/zero/internal/zenline"
 	"github.com/Gitlawb/zero/internal/zeroruntime"
 )
 
@@ -58,6 +60,19 @@ type model struct {
 	width              int
 	height             int
 	now                func() time.Time
+
+	skin             string // "" default shell, "zenline" reskin
+	themeVariant     int    // zenline color theme (0-4)
+	themeDark        bool   // zenline light/dark
+	frame            int    // animation frame counter (zenline spinner)
+	booted           bool   // zenline boot splash finished
+	streamingText    string // live assistant text for the current segment
+	streamStartFrame int    // frame the current stream segment began (tok/s)
+}
+
+type agentTextMsg struct {
+	runID int
+	delta string
 }
 
 type agentResponseMsg struct {
@@ -133,9 +148,16 @@ func newModel(ctx context.Context, options Options) model {
 	input := textinput.New()
 	input.Prompt = "zero > "
 	input.Placeholder = "Ask Zero to inspect, edit, explain, or run a command..."
+	if options.Skin == "zenline" {
+		input.Prompt = "❯ "
+		input.Placeholder = "message zero — / commands · @ files · ! bash"
+	}
 	input.Focus()
 
 	return model{
+		skin:         options.Skin,
+		themeVariant: options.ThemeVariant,
+		themeDark:    options.ThemeDark,
 		ctx:                ctx,
 		cwd:                cwd,
 		gitBranch:          gitBranch(cwd),
@@ -161,6 +183,9 @@ func newModel(ctx context.Context, options Options) model {
 }
 
 func (m model) Init() tea.Cmd {
+	if m.skin == "zenline" {
+		return tea.Batch(textinput.Blink, zenlineTick())
+	}
 	return textinput.Blink
 }
 
@@ -187,6 +212,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingPermission != nil {
 			return m.handlePermissionKey(msg)
 		}
+		if m.skin == "zenline" {
+			m.booted = true // any key dismisses the boot splash
+			if nm, handled := m.handleZenlineKeys(msg); handled {
+				return nm, nil
+			}
+		}
+	case zenlineTickMsg:
+		if m.skin != "zenline" {
+			return m, nil
+		}
+		m.frame++
+		if m.frame >= bootFrames {
+			m.booted = true
+		}
+		return m, zenlineTick()
+	case agentTextMsg:
+		if msg.runID != m.activeRunID {
+			return m, nil
+		}
+		if m.streamingText == "" {
+			m.streamStartFrame = m.frame
+		}
+		m.streamingText += msg.delta
+		m.showSplash = false
+		return m, nil
+	case tea.MouseMsg:
+		if m.skin == "zenline" && m.pendingPermission != nil &&
+			msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			switch zenline.PermLayout(m.width, m.height).Hit(msg.X, msg.Y) {
+			case "allow":
+				return m.resolvePermission(permissionDecisionAllow)
+			case "always":
+				return m.resolvePermission(permissionDecisionAlwaysAllow)
+			case "deny":
+				return m.resolvePermission(permissionDecisionDeny)
+			}
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -212,6 +275,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runCancel = nil
 		m.activeRunID = 0
 		m.pendingPermission = nil
+		m.streamingText = ""
 		for _, event := range msg.usageEvents {
 			var usageRows []transcriptRow
 			m, usageRows = m.recordUsageEvent(msg.usageModelID, event)
@@ -238,6 +302,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.runID != m.activeRunID {
 			return m, nil
 		}
+		// a tool call ends the current streamed text segment
+		if msg.row.kind == rowToolCall {
+			m.streamingText = ""
+		}
 		m.transcript = appendTranscriptRow(m.transcript, msg.row)
 		return m, nil
 	}
@@ -248,6 +316,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	if m.skin == "zenline" {
+		return m.zenlineView()
+	}
 	if m.showSplash {
 		return m.startupView()
 	}
@@ -424,6 +495,12 @@ func (m model) handleSubmit() (tea.Model, tea.Cmd) {
 		m, text = m.handleCompactCommand(command.text)
 		m.transcript = reduceTranscript(m.transcript, transcriptAction{kind: actionAppendSystem, text: text})
 		return m, nil
+	case commandRewind:
+		m.showSplash = false
+		text := ""
+		m, text = m.handleRewindCommand(command.text)
+		m.transcript = reduceTranscript(m.transcript, transcriptAction{kind: actionAppendSystem, text: text})
+		return m, nil
 	case commandEffort:
 		m.showSplash = false
 		text := ""
@@ -519,6 +596,14 @@ func (m model) runAgent(runID int, runCtx context.Context, prompt string) tea.Cm
 		options.Registry = m.registry
 		options.PermissionMode = m.permissionMode
 
+		onText := options.OnText
+		options.OnText = func(delta string) {
+			m.sendAgentText(runID, delta)
+			if onText != nil {
+				onText(delta)
+			}
+		}
+
 		onPermissionRequest := options.OnPermissionRequest
 		options.OnPermissionRequest = func(ctx context.Context, request agent.PermissionRequest) (agent.PermissionDecision, error) {
 			if onPermissionRequest != nil {
@@ -568,6 +653,22 @@ func (m model) runAgent(runID int, runCtx context.Context, prompt string) tea.Cm
 					"arguments": call.Arguments,
 				},
 			})
+			// Snapshot before-state of files this call will mutate, NOW (before the
+			// mutation runs), then batch the checkpoint event with the rest.
+			if m.sessionStore != nil && m.activeSession.SessionID != "" {
+				var args map[string]any
+				if call.Arguments != "" {
+					_ = json.Unmarshal([]byte(call.Arguments), &args)
+				}
+				if targets := tools.MutationTargets(m.cwd, call.Name, args); len(targets) > 0 {
+					if payload, ok := m.sessionStore.SnapshotForCheckpoint(m.activeSession.SessionID, m.cwd, call.Name, targets); ok {
+						sessionEvents = append(sessionEvents, pendingSessionEvent{
+							Type:    sessions.EventSessionCheckpoint,
+							Payload: payload,
+						})
+					}
+				}
+			}
 			if onToolCall != nil {
 				onToolCall(call)
 			}
@@ -585,14 +686,21 @@ func (m model) runAgent(runID int, runCtx context.Context, prompt string) tea.Cm
 			}
 			rows = append(rows, row)
 			m.sendAgentRow(runID, row)
+			toolPayload := map[string]any{
+				"toolCallId": result.ToolCallID,
+				"name":       result.Name,
+				"status":     string(result.Status),
+				"output":     result.Output,
+			}
+			if result.Redacted {
+				toolPayload["redacted"] = true
+			}
+			if len(result.ChangedFiles) > 0 {
+				toolPayload["changedFiles"] = result.ChangedFiles
+			}
 			sessionEvents = append(sessionEvents, pendingSessionEvent{
-				Type: sessions.EventToolResult,
-				Payload: map[string]any{
-					"toolCallId": result.ToolCallID,
-					"name":       result.Name,
-					"status":     string(result.Status),
-					"output":     result.Output,
-				},
+				Type:    sessions.EventToolResult,
+				Payload: toolPayload,
 			})
 			if onToolResult != nil {
 				onToolResult(result)
@@ -671,6 +779,13 @@ func (m model) sendAgentRow(runID int, row transcriptRow) {
 		return
 	}
 	m.runtimeMessageSink(agentRowMsg{runID: runID, row: row})
+}
+
+func (m model) sendAgentText(runID int, delta string) {
+	if m.runtimeMessageSink == nil {
+		return
+	}
+	m.runtimeMessageSink(agentTextMsg{runID: runID, delta: delta})
 }
 
 func toolResultRowText(result agent.ToolResult) string {

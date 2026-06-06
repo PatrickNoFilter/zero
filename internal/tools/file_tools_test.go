@@ -182,3 +182,33 @@ func writeTestFile(t *testing.T, path string, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestGrepSkipsAlwaysExcludedDirectories(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel, body string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("keep.txt", "needle here")
+	mustWrite(".git/config", "needle here")
+	mustWrite("node_modules/pkg/index.js", "needle here")
+
+	res := NewGrepTool(root).Run(context.Background(), map[string]any{
+		"pattern":     "needle",
+		"output_mode": "files_with_matches",
+	})
+	if res.Status != StatusOK {
+		t.Fatalf("status=%s output=%s", res.Status, res.Output)
+	}
+	if strings.Contains(res.Output, ".git") || strings.Contains(res.Output, "node_modules") {
+		t.Fatalf("grep must not descend into excluded dirs, got:\n%s", res.Output)
+	}
+	if !strings.Contains(res.Output, "keep.txt") {
+		t.Fatalf("expected keep.txt in results, got:\n%s", res.Output)
+	}
+}
