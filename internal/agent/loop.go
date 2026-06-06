@@ -55,6 +55,8 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 
 	messages := zeroruntime.SeedMessages(buildSystemPrompt(), prompt)
 
+	guards := newGuardState()
+
 	result := Result{Messages: copyMessages(messages)}
 	for turn := 0; turn < maxTurns; turn++ {
 		result.Turns = turn + 1
@@ -91,6 +93,8 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 		if len(collected.ToolCalls) == 0 {
 			// The model intended a tool call but it was malformed and dropped.
 			// Tell it to retry rather than silently treating text as the answer.
+			// This path is handled before the no-output guard so a dropped-call
+			// turn is never counted as a runaway empty turn.
 			if collected.DroppedToolCalls > 0 {
 				messages = append(messages, zeroruntime.Message{
 					Role: zeroruntime.MessageRoleUser,
@@ -99,10 +103,33 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 				})
 				continue
 			}
+			// No-output guard: a turn with visible text is a real final answer.
+			// A truly-empty turn (no text, no tool calls, no dropped calls) is
+			// counted toward the runaway cap so we stop before burning maxTurns.
+			if guards.observeTurn(collected) {
+				result.FinalAnswer = noOutputStopAnswer(result.Turns)
+				result.Messages = copyMessages(messages)
+				return result, nil
+			}
+			if strings.TrimSpace(collected.Text) == "" {
+				// Empty-but-under-cap turn: nudge the model to make progress
+				// rather than treating the empty response as a final answer.
+				messages = append(messages, zeroruntime.Message{
+					Role: zeroruntime.MessageRoleUser,
+					Content: "Your previous response had no visible output and no tool calls. " +
+						"Continue the task by using a tool or reply with your final answer.",
+				})
+				continue
+			}
 			result.FinalAnswer = collected.Text
 			result.Messages = copyMessages(messages)
 			return result, nil
 		}
+
+		// A turn with tool calls is progress: update guard counters before
+		// executing so the empty-turn counter resets and plan-tracking signals
+		// stay current.
+		guards.observeTurn(collected)
 
 		for _, call := range collected.ToolCalls {
 			if options.OnToolCall != nil {
@@ -116,6 +143,16 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 				Role:       zeroruntime.MessageRoleTool,
 				Content:    toolResult.Output,
 				ToolCallID: toolResult.ToolCallID,
+			})
+		}
+
+		// Planning-enforcement reminders: light, one-shot, user-role nudges
+		// (like the dropped-call retry above). Only fire when the loop can
+		// observe by tool name that the plan is missing or stale.
+		if reminder := guards.planReminder(result.Turns); reminder != "" {
+			messages = append(messages, zeroruntime.Message{
+				Role:    zeroruntime.MessageRoleUser,
+				Content: reminder,
 			})
 		}
 	}
