@@ -25,10 +25,11 @@ func Run(ctx context.Context, options Options) int {
 		tea.WithInput(os.Stdin),
 		tea.WithOutput(os.Stdout),
 	}
-	if options.Skin == "zenline" {
-		// enable mouse so the centered permission modal buttons are clickable
-		programOpts = append(programOpts, tea.WithMouseCellMotion())
-	}
+	// NOTE: we intentionally do NOT enable mouse capture. Mouse cell-motion
+	// reporting routes clicks/drags to the program, which breaks the terminal's
+	// native text selection + copy and surprises users who expect normal
+	// click/select/copy/paste. The permission modal is fully keyboard-driven
+	// (a/y/d/Esc), so capturing the mouse buys little and costs core UX.
 	program = tea.NewProgram(newModel(ctx, options), programOpts...)
 
 	if _, err := program.Run(); err != nil {
