@@ -31,7 +31,7 @@ func TestToolResultLoadedToolsField(t *testing.T) {
 // assert executeToolCall lifts it into ToolResult.LoadedTools.
 type loadSignalTool struct{ value string }
 
-func (t loadSignalTool) Name() string       { return "load_signal" }
+func (t loadSignalTool) Name() string        { return "load_signal" }
 func (t loadSignalTool) Description() string { return "emits a load_tools signal" }
 func (t loadSignalTool) Parameters() tools.Schema {
 	return tools.Schema{Type: "object", AdditionalProperties: false}
@@ -97,7 +97,7 @@ type fakeDeferredTool struct {
 	desc string
 }
 
-func (t fakeDeferredTool) Name() string       { return t.name }
+func (t fakeDeferredTool) Name() string        { return t.name }
 func (t fakeDeferredTool) Description() string { return t.desc }
 func (t fakeDeferredTool) Parameters() tools.Schema {
 	return tools.Schema{Type: "object", AdditionalProperties: false}
@@ -114,7 +114,7 @@ func (t fakeDeferredTool) Deferred() bool { return true }
 // builtin) so the inactive path can assert it is dropped.
 type fakeToolSearchTool struct{}
 
-func (fakeToolSearchTool) Name() string       { return "tool_search" }
+func (fakeToolSearchTool) Name() string        { return "tool_search" }
 func (fakeToolSearchTool) Description() string { return "load deferred tool schemas" }
 func (fakeToolSearchTool) Parameters() tools.Schema {
 	return tools.Schema{Type: "object", AdditionalProperties: false}
@@ -292,6 +292,108 @@ func TestRunLoadsDeferredToolThenAdvertisesNextTurn(t *testing.T) {
 	}
 
 	// The reminder must NOT persist into the returned message history.
+	for _, m := range result.Messages {
+		if m.Role == zeroruntime.MessageRoleUser && strings.Contains(m.Content, "Call tool_search") {
+			t.Fatalf("the deferred-tools reminder must not be persisted in result.Messages")
+		}
+	}
+}
+
+// TestRunReactiveRetryKeepsLoadedDeferredToolAndReminder drives a mid-run
+// context-limit error that triggers reactive compaction+retry while deferral is
+// ACTIVE and a deferred tool is already loaded. The retried turn must NOT be
+// degraded to the empty-loaded/no-reminder state: it must still advertise the
+// loaded tool's FULL schema and carry the <system-reminder> for the hidden tool.
+func TestRunReactiveRetryKeepsLoadedDeferredToolAndReminder(t *testing.T) {
+	registry := tools.NewRegistry()
+	// load_signal asks the loop to load mcp__srv__alpha next turn.
+	registry.Register(loadSignalTool{value: "mcp__srv__alpha"})
+	registry.Register(fakeDeferredTool{name: "mcp__srv__alpha", desc: "alpha tool"})
+	registry.Register(fakeDeferredTool{name: "mcp__srv__beta", desc: "beta tool"})
+
+	// Request indices (mockProvider plays one turn per request, in order):
+	//   0: turn 1 — calls load_signal (loads mcp__srv__alpha for later turns)
+	//   1: turn 2 — emits a context-limit error MID-stream -> reactive recover
+	//   2: the summarize call inside Compact (must return non-empty text)
+	//   3: the RETRY request rebuilt after compaction — asserted below
+	provider := &mockProvider{turns: [][]zeroruntime.StreamEvent{
+		{ // turn 1: call load_signal
+			{Type: zeroruntime.StreamEventToolCallStart, ToolCallID: "c1", ToolName: "load_signal"},
+			{Type: zeroruntime.StreamEventToolCallEnd, ToolCallID: "c1"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+		{ // turn 2: mid-stream context-limit error -> reactive compaction
+			{Type: zeroruntime.StreamEventError, Error: "prompt is too long: 250000 tokens > 200000 maximum"},
+		},
+		{ // summarize call inside Compact
+			{Type: zeroruntime.StreamEventText, Content: "SUMMARY"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+		{ // retry of turn 2 after compaction: final answer
+			{Type: zeroruntime.StreamEventText, Content: "done"},
+			{Type: zeroruntime.StreamEventDone},
+		},
+	}}
+
+	// A large user prompt so the elided middle is big enough that reactive
+	// compaction actually shrinks the history (recover only retries when it can
+	// shrink). ContextWindow is set high enough that PROACTIVE compaction (which
+	// fires at 0.8 * window at the top of a turn) does NOT trigger first — so the
+	// only summarize call is the reactive one, keeping the request sequence
+	// predictable: turn1, errored turn2, summarize, retry.
+	bigPrompt := strings.Repeat("work on this task. ", 2000)
+	result, err := Run(context.Background(), bigPrompt, provider, Options{
+		Registry:               registry,
+		DeferThreshold:         2, // 2 deferred tools => active
+		ContextWindow:          1_000_000,
+		CompactionPreserveLast: 2,
+	})
+	if err != nil {
+		t.Fatalf("run returned error: %v", err)
+	}
+	if result.FinalAnswer != "done" {
+		t.Fatalf("expected final answer from the retried turn, got %q", result.FinalAnswer)
+	}
+	// 4 provider calls: turn1, errored turn2, summarize, retry.
+	if len(provider.requests) != 4 {
+		t.Fatalf("expected 4 provider requests (turn1, errored turn2, summarize, retry), got %d", len(provider.requests))
+	}
+
+	retry := provider.requests[3]
+
+	// The retry must advertise the loaded deferred tool with its FULL schema —
+	// NOT re-hide it as the empty-loaded partition would.
+	var alpha *zeroruntime.ToolDefinition
+	for i := range retry.Tools {
+		if retry.Tools[i].Name == "mcp__srv__alpha" {
+			alpha = &retry.Tools[i]
+		}
+		if retry.Tools[i].Name == "mcp__srv__beta" {
+			t.Fatalf("retry must keep the never-loaded deferred tool hidden, got %#v", retry.Tools)
+		}
+	}
+	if alpha == nil {
+		t.Fatalf("retry must still advertise the loaded deferred tool mcp__srv__alpha, got %#v", retry.Tools)
+	}
+	if alpha.Parameters["type"] != "object" {
+		t.Fatalf("retry must advertise the loaded tool's FULL schema, got %#v", alpha.Parameters)
+	}
+
+	// The retry must carry the deferred-tools reminder as its trailing user
+	// message (the hidden tool is mcp__srv__beta) — not the no-reminder state.
+	last := retry.Messages[len(retry.Messages)-1]
+	if last.Role != zeroruntime.MessageRoleUser || !strings.Contains(last.Content, "tool_search") {
+		t.Fatalf("retry request must end with the deferred-tools reminder, got role=%s content=%q", last.Role, last.Content)
+	}
+	if !strings.Contains(last.Content, "mcp__srv__beta") {
+		t.Fatalf("retry reminder must list the still-hidden tool mcp__srv__beta, got %q", last.Content)
+	}
+	if strings.Contains(last.Content, "mcp__srv__alpha") {
+		t.Fatalf("loaded tool must not appear in the retry reminder, got %q", last.Content)
+	}
+
+	// The reminder must NOT persist into the returned message history, even on
+	// the reactive-retry path.
 	for _, m := range result.Messages {
 		if m.Role == zeroruntime.MessageRoleUser && strings.Contains(m.Content, "Call tool_search") {
 			t.Fatalf("the deferred-tools reminder must not be persisted in result.Messages")

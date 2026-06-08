@@ -106,9 +106,23 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 					result.Messages = copyMessages(messages)
 					return result, retryErr
 				}
+				// Rebuild from the compacted messages but reuse the SAME active-mode
+				// partition (exposed) and reminder computed for this turn: they depend
+				// on registry+loaded, not on the messages, so they stay valid after
+				// compaction. Using the bare toolDefinitions here would route through an
+				// empty-loaded partition, re-hiding every already-loaded deferred tool
+				// and dropping the reminder when deferral is active.
 				request = zeroruntime.CompletionRequest{
 					Messages: copyMessages(messages),
-					Tools:    toolDefinitions(registry, permissionMode, options),
+					Tools:    exposed,
+				}
+				if reminder != "" {
+					// Append to the per-turn retry copy only — NEVER to persistent
+					// messages — matching the main path's reminder-not-persisted invariant.
+					request.Messages = append(request.Messages, zeroruntime.Message{
+						Role:    zeroruntime.MessageRoleUser,
+						Content: reminder,
+					})
 				}
 				stream, err = provider.StreamCompletion(ctx, request)
 			}
@@ -132,9 +146,22 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 					result.Messages = copyMessages(messages)
 					return result, retryErr
 				}
+				// Reuse the SAME active-mode partition (exposed) and reminder from this
+				// turn rather than the bare toolDefinitions: exposed/reminder depend on
+				// registry+loaded (not the messages), so they stay valid after compaction.
+				// Routing through an empty-loaded partition here would re-hide every
+				// already-loaded deferred tool and drop the reminder when deferral is active.
 				retryRequest := zeroruntime.CompletionRequest{
 					Messages: copyMessages(messages),
-					Tools:    toolDefinitions(registry, permissionMode, options),
+					Tools:    exposed,
+				}
+				if reminder != "" {
+					// Append to the per-turn retry copy only — NEVER to persistent
+					// messages — matching the main path's reminder-not-persisted invariant.
+					retryRequest.Messages = append(retryRequest.Messages, zeroruntime.Message{
+						Role:    zeroruntime.MessageRoleUser,
+						Content: reminder,
+					})
 				}
 				retryStream, retryStreamErr := provider.StreamCompletion(ctx, retryRequest)
 				if retryStreamErr != nil {
