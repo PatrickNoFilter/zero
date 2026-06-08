@@ -251,3 +251,24 @@ func TestBuildDeferredReminder(t *testing.T) {
 		}
 	})
 }
+
+func TestDeferredLineUsesToolFieldsAndServer(t *testing.T) {
+	tool := fakeDeferredTool{
+		baseTool: baseTool{
+			name:        "mcp_docs_lookup",
+			description: "Look up documentation for a symbol.",
+			parameters: Schema{
+				Type:       "object",
+				Properties: map[string]PropertySchema{"symbol": {Type: "string"}},
+				Required:   []string{"symbol"},
+			},
+		},
+		deferred: true,
+	}
+	got := DeferredLine(tool)
+	for _, want := range []string{"mcp_docs_lookup: Look up documentation", "server: docs", "inputs (* required): symbol (string)*"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("DeferredLine = %q, missing %q", got, want)
+		}
+	}
+}

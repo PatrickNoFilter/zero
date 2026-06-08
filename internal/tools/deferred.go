@@ -156,6 +156,14 @@ func formatDeferredToolLine(name, description, server string, schema Schema) str
 	return strings.Join(parts, " | ")
 }
 
+// DeferredLine renders the compact advertisement line for a single deferred
+// tool, deriving the MCP server token from the tool's name. It is the exported
+// entry point the agent loop uses to build each line of the deferred-tools
+// reminder, so callers in other packages never touch the unexported formatters.
+func DeferredLine(t Tool) string {
+	return formatDeferredToolLine(t.Name(), t.Description(), mcpServerFromToolName(t.Name()), t.Parameters())
+}
+
 const (
 	systemReminderStart = "<system-reminder>"
 	systemReminderEnd   = "</system-reminder>"
