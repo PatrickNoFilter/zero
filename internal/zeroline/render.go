@@ -777,7 +777,7 @@ func (s styles) transcript(d ChatData, w, h int) string {
 			lines = append(lines, s.renderFinal(r.Text, mini(74, tw-2), false)...)
 		case "done":
 			blank()
-			add(s.doneLine(r.Text, r.Status))
+			add(s.doneLine(r.Text, r.Status, tw))
 		case "toolcall":
 			blank()
 			marker := s.mute.Render("▸")
@@ -808,10 +808,10 @@ func (s styles) transcript(d ChatData, w, h int) string {
 			add(s.amb.Render("⚠ ") + s.dim.Render(clip(r.Text, tw-4)))
 		case "system":
 			blank()
-			add(s.noteLine(r.Text, false, tw)) // sys note (faint)
+			add(s.noteLines(r.Text, false, tw)...) // sys note (faint), one line each
 		case "error":
 			blank()
-			add(s.noteLine(r.Text, true, tw)) // deny note (red)
+			add(s.noteLines(r.Text, true, tw)...) // deny note (red)
 		}
 	}
 
@@ -844,12 +844,31 @@ func (s styles) transcript(d ChatData, w, h int) string {
 	return lipgloss.NewStyle().PaddingLeft(2).Render(out)
 }
 
-// renderSay lays out intermediate assistant prose (.blk-say): muted, wrapped at
-// w columns. While streaming, a blinking-style accent caret trails the last line.
+// wrapBlock splits text on explicit newlines, word-wraps each line to w, and
+// re-clips so an unbroken token longer than w can't overflow (wrap() does not
+// hard-break a single long word). Blank input lines are preserved.
+func wrapBlock(text string, w int) []string {
+	var out []string
+	for _, para := range strings.Split(text, "\n") {
+		wrapped := wrap(para, w)
+		if len(wrapped) == 0 {
+			out = append(out, "")
+			continue
+		}
+		for _, l := range wrapped {
+			out = append(out, clip(l, w))
+		}
+	}
+	return out
+}
+
+// renderSay lays out intermediate/streaming assistant prose (.blk-say): muted
+// (spec --muted = Pal.Dim), preserving line structure. While streaming, an accent
+// caret trails the last line.
 func (s styles) renderSay(text string, w int, streaming bool) []string {
 	var out []string
-	for _, l := range wrap(text, w) {
-		out = append(out, s.mute.Render(l))
+	for _, l := range wrapBlock(text, w) {
+		out = append(out, s.dim.Render(l))
 	}
 	if streaming {
 		if len(out) == 0 {
@@ -861,11 +880,11 @@ func (s styles) renderSay(text string, w int, streaming bool) []string {
 }
 
 // renderFinal lays out the final answer (.blk-final): a 1-col accent left rail +
-// ink text wrapped at w columns.
+// ink text, preserving line structure and re-clipping to w.
 func (s styles) renderFinal(text string, w int, streaming bool) []string {
 	rail := s.acc.Render("│")
 	var out []string
-	for _, l := range wrap(text, w) {
+	for _, l := range wrapBlock(text, w) {
 		out = append(out, rail+" "+s.fg.Render(l))
 	}
 	if len(out) == 0 {
@@ -877,24 +896,29 @@ func (s styles) renderFinal(text string, w int, streaming bool) []string {
 	return out
 }
 
-// doneLine renders the turn-summary line (.blk-done): a green ● (red on failure)
-// + faint meta (e.g. "12 tools · 1,284 tok · $0.04").
-func (s styles) doneLine(meta, status string) string {
-	dot := s.green.Render("●")
+// doneLine renders the turn-summary line (.blk-done): a green ■ (red on failure)
+// + faint meta (spec --faint = Pal.Mute), clipped to the frame width.
+func (s styles) doneLine(meta, status string, w int) string {
+	dot := s.green.Render("■")
 	if status == "error" {
-		dot = s.red.Render("●")
+		dot = s.red.Render("■")
 	}
-	return dot + " " + s.dim.Render(clip(firstLine(meta), 84))
+	return dot + " " + s.mute.Render(clip(firstLine(meta), w-2))
 }
 
-// noteLine renders a one-line note (.blk-note): a faint sys note, or a red deny
-// note, marked with a left bar.
-func (s styles) noteLine(text string, deny bool, w int) string {
-	st := s.dim
+// noteLines renders a note block (.blk-note), one styled line per input line so
+// multi-line system notes (e.g. a resume-session summary) aren't truncated. sys
+// notes are faint (spec --faint = Pal.Mute); deny notes are red.
+func (s styles) noteLines(text string, deny bool, w int) []string {
+	st := s.mute
 	if deny {
 		st = s.red
 	}
-	return st.Render("│ " + clip(firstLine(text), w-2))
+	var out []string
+	for _, ln := range strings.Split(text, "\n") {
+		out = append(out, st.Render("│ "+clip(ln, w-2)))
+	}
+	return out
 }
 
 // renderAssistant lays out a model message. Completed messages (markdown=true)

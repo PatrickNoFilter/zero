@@ -36,9 +36,9 @@ func TestTranscriptBlocks(t *testing.T) {
 		t.Errorf("final block missing rail/text: %q", out)
 	}
 
-	// done: ● + faint meta
+	// done: ■ + faint meta
 	out = stripANSI(RenderChat(chatWith([]Row{{Kind: "done", Text: "12 tools · 1,284 tok · $0.04", Status: "ok"}})))
-	if !strings.Contains(out, "●") || !strings.Contains(out, "12 tools") {
+	if !strings.Contains(out, "■") || !strings.Contains(out, "12 tools") {
 		t.Errorf("done block missing dot/meta: %q", out)
 	}
 
@@ -64,6 +64,41 @@ func TestStreamingCaretOnlyMidStream(t *testing.T) {
 	still := stripANSI(RenderChat(chatWith([]Row{{Kind: "assistant", Text: "settled answer"}})))
 	if strings.Contains(still, "▌") {
 		t.Errorf("non-streaming transcript must not show the caret")
+	}
+}
+
+func TestMultiLineNotePreserved(t *testing.T) {
+	// A multi-line system note (e.g. a resume-session summary) must keep all lines.
+	out := stripANSI(RenderChat(chatWith([]Row{{Kind: "system", Text: "Resumed session\nid: abc123\nmodel: opus"}})))
+	for _, want := range []string{"Resumed session", "id: abc123", "model: opus"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("multi-line note dropped %q", want)
+		}
+	}
+}
+
+func TestStreamingPreservesNewlines(t *testing.T) {
+	d := chatWith(nil)
+	d.Stream = "first paragraph\n\nsecond paragraph"
+	d.Working = true
+	out := stripANSI(RenderChat(d))
+	if !strings.Contains(out, "first paragraph") || !strings.Contains(out, "second paragraph") {
+		t.Errorf("streaming flattened line structure: %q", out)
+	}
+}
+
+func TestLongTokenReclipped(t *testing.T) {
+	// wrap() does not hard-break a single long word; the block helpers must re-clip.
+	s := newStyles(Resolve(0, true), 0, true)
+	for _, line := range s.renderFinal(strings.Repeat("X", 300), 74, false) {
+		if lipgloss.Width(line) > 76 { // rail "│ " (2) + 74
+			t.Fatalf("renderFinal line overflows budget: %d cells", lipgloss.Width(line))
+		}
+	}
+	for _, line := range s.renderSay(strings.Repeat("Y", 300), 74, false) {
+		if lipgloss.Width(line) > 74 {
+			t.Fatalf("renderSay line overflows budget: %d cells", lipgloss.Width(line))
+		}
 	}
 }
 
