@@ -155,6 +155,14 @@ func (m model) zerolineView() string {
 		return zeroline.RenderBoot(m.themeVariant, m.themeDark, m.frame, width, height)
 	}
 
+	// Spec composer placeholder per surface (m is a value receiver, so this only
+	// affects this render). The composer renders the ❯ prompt + accent caret.
+	if m.showSplash {
+		m.input.Placeholder = "describe a task for zero…"
+	} else {
+		m.input.Placeholder = "message zero…"
+	}
+
 	header := m.zerolineHeader()
 
 	// Home until the first turn is submitted.

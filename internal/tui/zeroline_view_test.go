@@ -178,6 +178,29 @@ func TestZerolineDrawerNotOpenedOnHome(t *testing.T) {
 	}
 }
 
+func TestZerolineComposerPlaceholderClean(t *testing.T) {
+	m := newZerolineModel()
+	m.input.SetValue("")
+
+	m.showSplash = true
+	home := m.View()
+	if strings.Contains(home, "%") {
+		t.Errorf("home composer must have no %% artifact: %q", home)
+	}
+	if !strings.Contains(home, "describe a task for zero") {
+		t.Error("home placeholder text missing")
+	}
+
+	m.showSplash = false
+	chat := m.View()
+	if strings.Contains(chat, "%") {
+		t.Errorf("chat composer must have no %% artifact: %q", chat)
+	}
+	if !strings.Contains(chat, "message zero") {
+		t.Error("chat placeholder text missing")
+	}
+}
+
 func TestZerolineThemeKeys(t *testing.T) {
 	m := newZerolineModel()
 	// digit selects theme when input empty

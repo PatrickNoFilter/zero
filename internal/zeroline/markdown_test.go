@@ -158,7 +158,9 @@ func TestLooksLikeDiff(t *testing.T) {
 	}
 }
 
-func TestAssistantRowRendersMarkdown(t *testing.T) {
+func TestAssistantRowRendersPlainMuted(t *testing.T) {
+	// .blk-say is plain MUTED prose (no markdown formatting, no panel): markers are
+	// preserved verbatim rather than rendered through glamour.
 	d := ChatData{
 		Variant: 0, Dark: true, Width: 100, Height: 40,
 		Rows: []Row{
@@ -166,11 +168,11 @@ func TestAssistantRowRendersMarkdown(t *testing.T) {
 		},
 	}
 	out := stripANSI(RenderChat(d))
-	if strings.Contains(out, "**bold**") {
-		t.Errorf("completed assistant markdown not rendered (raw markers present): %q", out)
+	if !strings.Contains(out, "**bold**") {
+		t.Errorf("assistant prose should render plainly (keep markers): %q", out)
 	}
-	if !strings.Contains(out, "bold") {
-		t.Errorf("assistant text missing from render: %q", out)
+	if !strings.Contains(out, "- one") || !strings.Contains(out, "- two") {
+		t.Errorf("assistant list lines missing: %q", out)
 	}
 }
 

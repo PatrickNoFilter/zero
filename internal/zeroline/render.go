@@ -210,23 +210,24 @@ func DefaultChips() []string {
 	}
 }
 
-// chipRow renders one suggestion chip: an accent ❯ + label padded to width w.
-// The selected chip carries a leading accent ▌ rail (visible without color).
-func (s styles) chipRow(label string, selected bool, w int) string {
+// chipBox renders one suggestion chip as its own bordered rounded box (.chip): an
+// accent ❯ + label on a panel background, exactly w cells wide (3 rows tall). The
+// selected chip uses a thick accent border — the terminal analog of the spec's
+// accent hover border, and visible without color.
+func (s styles) chipBox(label string, selected bool, w int) string {
 	if w < 8 {
 		w = 8
 	}
-	rail := "  "
-	textStyle := s.dim
+	p := s.pal
+	bstyle, bcolor := lipgloss.RoundedBorder(), p.Line
 	if selected {
-		rail = s.acc.Render("▌") + " "
-		textStyle = s.fg.Bold(true)
+		bstyle, bcolor = lipgloss.ThickBorder(), p.Accent
 	}
-	inner := rail + s.acc.Render("❯") + " " + textStyle.Render(clip(label, w-4))
-	if pad := w - lipgloss.Width(inner); pad > 0 {
-		inner += strings.Repeat(" ", pad)
-	}
-	return inner
+	content := s.acc.Bold(true).Render("❯") + " " + s.fg.Render(clip(label, w-6))
+	return lipgloss.NewStyle().
+		Border(bstyle).BorderForeground(bcolor).BorderBackground(p.Bg).
+		Background(p.Panel).Padding(0, 1).Width(w - 2).
+		Render(content)
 }
 
 // RenderHome renders the centered Zen landing surface: the ZERO wordmark, the
@@ -248,14 +249,17 @@ func RenderHome(d HomeData) string {
 	if len(d.Chips) > 0 {
 		b.WriteString("\n")
 		for i, c := range d.Chips {
-			b.WriteString(s.chipRow(c, i == d.ChipIndex, cw) + "\n")
+			if i > 0 {
+				b.WriteString("\n") // 1-row gap between chips
+			}
+			b.WriteString(s.chipBox(c, i == d.ChipIndex, cw) + "\n")
 		}
 	}
 	b.WriteString("\n")
 
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.Line).
 		BorderBackground(p.Bg).Background(p.Bg).
-		Padding(0, 1).Width(cw - 2).Render(d.Input)
+		Padding(0, 1).Width(cw - 2).Render(s.acc.Bold(true).Render("❯") + " " + d.Input)
 	b.WriteString(box + "\n")
 	homeOverlayCap := len(d.Suggestions) + 1
 	if d.Picker != nil {
@@ -811,10 +815,10 @@ func (s styles) transcript(d ChatData, w, h int) string {
 			add(s.acc.Bold(true).Render("❯ ") + s.fg.Render(clip(r.Text, tw-2)))
 		case "assistant":
 			blank()
-			// Completed prose keeps markdown/code rendering (real messages inline
-			// code that the static mock routes through tool cards); the muted "say"
-			// look is reserved for live streaming below.
-			lines = append(lines, s.renderAssistant(r.Text, mini(74, tw), true)...)
+			// .blk-say: plain MUTED prose, no panel/background, wrapped ~74 cols
+			// (same as the streaming "say" below). Only the final answer gets the
+			// accent rail + ink.
+			lines = append(lines, s.renderSay(r.Text, mini(74, tw), false)...)
 		case "final":
 			blank()
 			lines = append(lines, s.renderFinal(r.Text, mini(74, tw-2), false)...)

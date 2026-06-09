@@ -34,22 +34,4 @@ func TestHomeWordmarkTaglineHintChips(t *testing.T) {
 	}
 }
 
-func TestHomeChipSelectionHighlighted(t *testing.T) {
-	s := newCanvasStyles(Resolve(0, true), 0, true)
-	sel := stripANSI(s.chipRow("do a thing", true, 50))
-	un := stripANSI(s.chipRow("do a thing", false, 50))
-	if sel == un {
-		t.Fatal("selected chip must differ from unselected in plain text (tests have no color)")
-	}
-	if !strings.Contains(sel, "▌") {
-		t.Errorf("selected chip should show the accent rail, got %q", sel)
-	}
-	if strings.Contains(un, "▌") {
-		t.Errorf("unselected chip should not show the rail, got %q", un)
-	}
-	for _, c := range []string{sel, un} {
-		if !strings.Contains(c, "❯") || !strings.Contains(c, "do a thing") {
-			t.Errorf("chip must carry arrow + label, got %q", c)
-		}
-	}
-}
+// Chip selection/border behavior is covered by TestChipBoxBorderedAndSelected.

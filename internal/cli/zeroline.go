@@ -88,9 +88,9 @@ func runZeroline(args []string, stdout io.Writer, stderr io.Writer, deps appDeps
 		} else {
 			frame = zeroline.RenderHome(zeroline.HomeData{
 				Variant: v, Dark: !*light, Width: *width, Height: *height, Header: hdr,
-				Input:     "❯ message zero — / commands · @ files · ! bash",
+				Input:     "describe a task for zero…",
 				Chips:     zeroline.DefaultChips(),
-				ChipIndex: -1,
+				ChipIndex: 0,
 			})
 		}
 		if _, err := fmt.Fprintln(stdout, frame); err != nil {
