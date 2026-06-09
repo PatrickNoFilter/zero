@@ -3,70 +3,7 @@ package zeroline
 import (
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
-
-// forceColor makes lipgloss emit ANSI escapes regardless of the test TTY so we
-// can assert that styled output is actually colored.
-func forceColor(t *testing.T) {
-	t.Helper()
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-}
-
-func TestColorizeDiffColorsAddsAndDels(t *testing.T) {
-	forceColor(t)
-	p := Resolve(0, true)
-	diff := "@@ -1,2 +1,2 @@\n context line\n-removed line\n+added line\n"
-	out := colorizeDiff(diff, p)
-
-	// content survives
-	plain := stripANSI(out)
-	for _, w := range []string{"added line", "removed line", "context line"} {
-		if !strings.Contains(plain, w) {
-			t.Errorf("diff output missing %q: %q", w, plain)
-		}
-	}
-	// a subtle left gutter is present
-	if !strings.Contains(plain, "│") {
-		t.Errorf("diff output missing left gutter: %q", plain)
-	}
-
-	// adds and dels are colored DISTINCTLY: the addition is rendered in the
-	// theme Green and the deletion in the theme Red. The diff line keeps its
-	// leading +/- marker, so we assert against the marked text.
-	green := lipgloss.NewStyle().Foreground(p.Green).Render("+added line")
-	red := lipgloss.NewStyle().Foreground(p.Red).Render("-removed line")
-	if !strings.Contains(out, green) {
-		t.Errorf("added line not colored with theme Green")
-	}
-	if !strings.Contains(out, red) {
-		t.Errorf("removed line not colored with theme Red")
-	}
-	if string(p.Green) == string(p.Red) {
-		t.Fatal("theme 0 unexpectedly uses the same color for green/red")
-	}
-}
-
-func TestColorizeDiffCapsLongDiffs(t *testing.T) {
-	p := Resolve(0, true)
-	var b strings.Builder
-	b.WriteString("@@ -1,100 +1,100 @@\n")
-	for i := 0; i < 100; i++ {
-		b.WriteString("+line\n")
-	}
-	out := stripANSI(colorizeDiff(b.String(), p))
-	if !strings.Contains(out, "more lines") {
-		t.Errorf("long diff not capped with a footer: %q", out)
-	}
-	// the cap means far fewer than 101 rendered lines
-	if n := strings.Count(out, "\n") + 1; n > diffMaxLines+2 {
-		t.Errorf("diff not capped: %d lines rendered", n)
-	}
-}
 
 func TestLooksLikeDiff(t *testing.T) {
 	cases := map[string]bool{

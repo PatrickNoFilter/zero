@@ -1359,10 +1359,6 @@ func splitGrepLine(ln string) (loc, text string) {
 	}
 }
 
-// diffMaxLines caps how many diff lines are colorized inline before a "… N more
-// lines" footer takes over, so a huge patch can't blow out the transcript.
-const diffMaxLines = 40
-
 // looksLikeDiff reports whether detail is a unified diff (hunk headers, file
 // markers, or +/- body lines), the trigger for structured diff rendering.
 func looksLikeDiff(detail string) bool {
@@ -1378,59 +1374,6 @@ func looksLikeDiff(detail string) bool {
 		}
 	}
 	return false
-}
-
-// colorizeDiff is the standalone, dependency-free unified-diff colorizer with
-// the requested (detail, Pal) signature: green additions, red deletions, dim
-// context, mute hunk/file headers, a subtle left gutter, capped at diffMaxLines
-// with a "… N more lines" footer. Returns a single joined string.
-func colorizeDiff(detail string, p Pal) string {
-	return strings.Join(newStyles(p, 0, true).colorizeDiff(detail, 0), "\n")
-}
-
-// colorizeDiff renders a unified diff with a subtle left gutter and per-line
-// coloring: green for additions, red for deletions, mute for hunk/file headers,
-// dim for context. Long diffs are capped at diffMaxLines with a "… N more lines"
-// footer. tw is the available width (0 = no clipping); content sits indented to
-// match the surrounding transcript.
-func (s styles) colorizeDiff(detail string, tw int) []string {
-	detail = strings.TrimRight(detail, "\n")
-	if detail == "" {
-		return nil
-	}
-	lines := strings.Split(detail, "\n")
-	gut := s.mute.Render("│ ")
-	cw := tw - 8
-	var out []string
-	for i, ln := range lines {
-		if i >= diffMaxLines {
-			out = append(out, "      "+s.mute.Render(fmt.Sprintf("│ … %d more lines", len(lines)-i)))
-			break
-		}
-		out = append(out, "      "+gut+s.diffLine(detab(ln), cw))
-	}
-	return out
-}
-
-// diffLine colors one unified-diff line by its leading marker. cw <= 0 disables
-// clipping (used by the standalone helper and tests).
-func (s styles) diffLine(ln string, cw int) string {
-	c := ln
-	if cw > 0 {
-		c = clip(ln, cw)
-	}
-	switch {
-	case strings.HasPrefix(ln, "@@"),
-		strings.HasPrefix(ln, "+++ "), strings.HasPrefix(ln, "--- "),
-		strings.HasPrefix(ln, "diff "), strings.HasPrefix(ln, "index "):
-		return s.mute.Render(c)
-	case strings.HasPrefix(ln, "+"):
-		return s.green.Render(c)
-	case strings.HasPrefix(ln, "-"):
-		return s.red.Render(c)
-	default:
-		return s.dim.Render(c)
-	}
 }
 
 func detab(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
