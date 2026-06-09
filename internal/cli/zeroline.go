@@ -117,7 +117,7 @@ func toolSnapshotRows(kind string) []zeroline.Row {
 			Detail: " \tfs.IntVar(&o.MaxSteps, \"max-steps\", 50, \"agent step cap\")\n+\tfs.BoolVar(&o.ShowVersion, \"version\", false, \"print version and exit\")\n \n+\tif o.ShowVersion {\n+\t\tfmt.Fprintln(o.Stdout, \"zero \"+buildinfo.Version)\n+\t}"}
 	case "read":
 		tool = zeroline.Row{Kind: "tool", Tool: "read_file", Text: "internal/agent/loop.go", Status: "ok",
-			Detail: "func (l *Loop) Run(ctx context.Context, task string) error {\n\tl.emit(Event{Type: EventStart})\n\tmsgs := l.seed(task)\n\tfor step := 0; step < l.MaxSteps; step++ {\n\t\treply, usage, err := l.model.Complete(ctx, msgs, l.tools)"}
+			Detail: "File: internal/agent/loop.go (164 lines)\n\n   1 | func (l *Loop) Run(ctx context.Context, task string) error {\n   2 | \tl.emit(Event{Type: EventStart})\n   3 | \tmsgs := l.seed(task)\n   4 | \tfor step := 0; step < l.MaxSteps; step++ {\n   5 | \t\treply, usage, err := l.model.Complete(ctx, msgs, l.tools)"}
 	case "bash":
 		tool = zeroline.Row{Kind: "tool", Tool: "bash", Text: "go test ./internal/cli/...", Status: "ok",
 			Detail: "ok  \tgithub.com/zero-dev/zero/internal/cli\t0.214s"}

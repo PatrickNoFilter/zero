@@ -45,6 +45,22 @@ func TestChipBoxBorderedAndSelected(t *testing.T) {
 	}
 }
 
+// The read_file tool already numbers its lines ("N | …") under a "File: … (N
+// lines)" header, so the read card must NOT add a second number column or repeat
+// the header.
+func TestReadCardNoDoubleNumbering(t *testing.T) {
+	s := newStyles(Resolve(0, true), 0, true)
+	detail := "File: x.py (132 lines)\n\n  1 | import random\n  2 | import time"
+	body := s.toolBody(Row{Kind: "tool", Tool: "read_file", Detail: detail}, 80)
+	joined := stripANSI(strings.Join(body, "\n"))
+	if strings.Contains(joined, "File:") {
+		t.Errorf("read card should drop the redundant File: header: %q", joined)
+	}
+	if len(body) == 0 || stripANSI(body[0]) != "  1 | import random" {
+		t.Errorf("read card should show the tool's own numbering once, got: %q", joined)
+	}
+}
+
 func TestHomeChipsAreSeparateBorderedBoxes(t *testing.T) {
 	d := HomeData{
 		Variant: 0, Dark: true, Width: 100, Height: 34, Header: Header{Model: "m"},

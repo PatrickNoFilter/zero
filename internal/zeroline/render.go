@@ -1196,7 +1196,7 @@ func (s styles) toolBody(r Row, w int) []string {
 		}
 		return s.numberedBody(r.Detail, w, 8, false)
 	case "read_file":
-		return s.numberedBody(r.Detail, w, 12, true)
+		return s.readBody(r.Detail, w, 12)
 	case "bash":
 		return s.bashBody(r.Text, r.Detail, r.Status, w)
 	case "grep":
@@ -1246,7 +1246,8 @@ func (s styles) diffBody(diff string, w int) []string {
 	return out
 }
 
-// numberedBody renders content lines (read_file / fallback), optionally numbered.
+// numberedBody renders content lines (fallback / write_file body), optionally
+// numbered.
 func (s styles) numberedBody(text string, w, max int, numbered bool) []string {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	faintest := lipgloss.NewStyle().Foreground(s.pal.Faintest)
@@ -1261,6 +1262,30 @@ func (s styles) numberedBody(text string, w, max int, numbered bool) []string {
 		} else {
 			out = append(out, s.mute.Render(clip(detab(ln), w)))
 		}
+	}
+	return out
+}
+
+// readBody renders a read_file card body. The tool already emits a "File: … (N
+// lines)" header and numbers each line ("N | …"), so we drop the redundant header
+// (the card head shows the path) and keep the tool's own numbering rather than
+// adding a second column.
+func (s styles) readBody(detail string, w, max int) []string {
+	lines := strings.Split(strings.TrimRight(detail, "\n"), "\n")
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "File:") {
+		lines = lines[1:]
+		for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+			lines = lines[1:]
+		}
+	}
+	faintest := lipgloss.NewStyle().Foreground(s.pal.Faintest)
+	var out []string
+	for i, ln := range lines {
+		if i >= max {
+			out = append(out, faintest.Render(fmt.Sprintf("     … %d more lines", len(lines)-i)))
+			break
+		}
+		out = append(out, s.mute.Render(clip(detab(ln), w)))
 	}
 	return out
 }
