@@ -81,7 +81,6 @@ type tuiTheme struct {
 // ink so every pairing survives 256-color downsampling.
 const (
 	colorPanel    = "#0e0e10" // card backgrounds
-	colorPanel2   = "#121215" // card header rows, picker rows
 	colorPanel3   = "#17171b" // selected/hovered row bg
 	colorLine     = "#242429" // default borders, rules
 	colorLine2    = "#414147" // emphasized borders
@@ -164,11 +163,6 @@ var zeroTheme = tuiTheme{
 // wrap their foreground styles through this instead of referencing hex.
 func (t tuiTheme) onPanel(style lipgloss.Style) lipgloss.Style {
 	return style.Background(lipgloss.Color(colorPanel))
-}
-
-// onPanel2 paints on the header/picker-row surface.
-func (t tuiTheme) onPanel2(style lipgloss.Style) lipgloss.Style {
-	return style.Background(lipgloss.Color(colorPanel2))
 }
 
 // onSel paints on the selected-row tint.
