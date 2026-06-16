@@ -298,7 +298,21 @@ func (engine *Engine) Evaluate(ctx context.Context, request Request) Decision {
 		return deny(request, risk, ViolationNetwork, "", "network access is blocked by sandbox policy", false)
 	}
 	if policy.DenyDestructiveShell && HasRiskCategory(risk, "destructive") {
-		return deny(request, risk, ViolationDestructiveCommand, "", "destructive shell command is blocked by sandbox policy", false)
+		granted := request.PermissionGranted || request.PermissionMode == PermissionUnsafe
+		switch {
+		case HasRiskCategory(risk, "destructive_catastrophic"):
+			// Irrecoverable, system-level commands (rm -rf / or $HOME, mkfs, dd to a
+			// raw device, fork bomb, …) are never run — not even in unsafe mode.
+			return deny(request, risk, ViolationDestructiveCommand, "", "destructive shell command is blocked by sandbox policy", false)
+		case granted:
+			// Unsafe mode / an explicit grant: fall through to the normal allow path
+			// below so a scoped delete the operator opted into actually runs.
+		default:
+			// Scoped-destructive (e.g. rm -rf <subdir>): ask the user instead of
+			// hard-blocking, so a deletion they intend can be approved at the prompt
+			// rather than forcing an ask_user workaround.
+			return Decision{Action: ActionPrompt, Risk: risk, Reason: "destructive shell command needs confirmation"}
+		}
 	}
 	if engine.store != nil {
 		reqRaw, _ := DeriveScope(request.ToolName, request.Args)

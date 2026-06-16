@@ -102,6 +102,12 @@ func classifyWithScope(request Request, scope *Scope) Risk {
 		}
 		if matchesDestructive(command) {
 			add("destructive", RiskCritical)
+			// destructive_catastrophic marks the irrecoverable, system-level forms
+			// (rm -rf / or $HOME/~/*, mkfs, dd to a raw device, fork bomb, chmod 777
+			// on a system tree, chown -R). These stay a hard block even in unsafe
+			// mode; the broader "destructive" set (e.g. rm -rf <subdir>, only flagged
+			// by the AST analyzer below) is downgraded to a prompt in the engine.
+			add("destructive_catastrophic", RiskCritical)
 		}
 		if pipedInstallerPattern.MatchString(command) {
 			add("piped_installer", RiskCritical)
