@@ -124,7 +124,13 @@ func NormalizeBaseURL(baseURL string, defaultBaseURL string, label string) (stri
 //     is closed (and re-dialed fresh) rather than reused after it has gone stale.
 var sharedHTTPClient = func() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 60 * time.Second
+	// 120s, not 60s: a slow cloud proxy (e.g. ollama `*:cloud`) can withhold its
+	// 200 response header until the upstream model emits a first token, so a 60s cap
+	// risked aborting a legitimately-slow-but-alive request. 120s still bounds a
+	// truly dead reused connection (which never responds) while tolerating slow
+	// header delivery; slow first tokens after the header are covered by the idle +
+	// content-stall watchdogs.
+	transport.ResponseHeaderTimeout = 120 * time.Second
 	transport.IdleConnTimeout = 30 * time.Second
 	return &http.Client{Transport: transport}
 }()

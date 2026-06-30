@@ -318,8 +318,8 @@ func TestHTTPClientReturnsStallHardenedSharedClient(t *testing.T) {
 	if !ok {
 		t.Fatalf("transport type = %T, want *http.Transport", got.Transport)
 	}
-	if tr.ResponseHeaderTimeout != 60*time.Second {
-		t.Fatalf("ResponseHeaderTimeout = %v, want 60s", tr.ResponseHeaderTimeout)
+	if tr.ResponseHeaderTimeout != 120*time.Second {
+		t.Fatalf("ResponseHeaderTimeout = %v, want 120s", tr.ResponseHeaderTimeout)
 	}
 	if tr.IdleConnTimeout != 30*time.Second {
 		t.Fatalf("IdleConnTimeout = %v, want 30s", tr.IdleConnTimeout)

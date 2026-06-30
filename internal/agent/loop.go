@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -652,8 +653,20 @@ func historySafeToolCalls(calls []ToolCall) []ToolCall {
 	for i, call := range calls {
 		safe[i] = call
 		args := strings.TrimSpace(call.Arguments)
-		if args == "" || !json.Valid([]byte(args)) {
+		switch {
+		case args == "":
 			safe[i].Arguments = "{}"
+		case json.Valid([]byte(args)):
+			// already a single valid JSON value — keep as-is
+		default:
+			// Recover the first object for the concatenated case so the replayed
+			// transcript matches what executeToolCall actually ran; otherwise (real
+			// corruption) fall back to an empty object.
+			if first, ok := recoverableToolArguments(args); ok {
+				safe[i].Arguments = first
+			} else {
+				safe[i].Arguments = "{}"
+			}
 		}
 	}
 	return safe
@@ -678,10 +691,53 @@ func toolSchemaJSON(registry *tools.Registry, name string) string {
 // is a non-nil ABORT error only when the call demands the whole run stop (a
 // canceled/timed-out ask_user prompt) rather than continuing — every ordinary
 // success or tool error returns a nil abort error.
+// recoverableToolArguments inspects a tool call's raw JSON arguments. It returns
+// the raw text of the FIRST JSON value when the payload is one value optionally
+// followed by additional WHOLE JSON values (the weak-model concatenated case, e.g.
+// `{A}{B}`). ok is false when the payload is genuinely malformed: a bad/truncated
+// first value, OR trailing NON-JSON garbage after a valid first value (e.g.
+// `{"x":1}xyz`) — that case must still error, not be silently accepted. Sharing
+// this between dispatch and replay-history keeps them consistent: only a cleanly
+// recoverable first object is ever used.
+func recoverableToolArguments(arguments string) (first string, ok bool) {
+	dec := json.NewDecoder(strings.NewReader(arguments))
+	var head json.RawMessage
+	if err := dec.Decode(&head); err != nil {
+		return "", false
+	}
+	// The remainder must be only whole JSON values (or nothing); any decode error
+	// other than EOF means trailing garbage — reject so corruption still surfaces.
+	for {
+		var rest json.RawMessage
+		if err := dec.Decode(&rest); err != nil {
+			if errors.Is(err, io.EOF) {
+				return strings.TrimSpace(string(head)), true
+			}
+			return "", false
+		}
+	}
+}
+
+// decodeToolArguments decodes a tool call's JSON arguments into v. It tolerates a
+// weaker model that packs MULTIPLE concatenated top-level JSON objects into one
+// arguments string (`{A}{B}`) — the cause of "invalid character '{' after top-level
+// value" failures with small models like minimax-m3 — by decoding the FIRST object
+// and ignoring the trailing WHOLE JSON values, so the primary intended call runs.
+// A genuinely malformed payload (bad/truncated first object, or non-JSON trailing
+// garbage) still returns the real parse error; a standard single-object payload
+// decodes exactly as before.
+func decodeToolArguments(arguments string, v any) error {
+	if first, ok := recoverableToolArguments(arguments); ok {
+		return json.Unmarshal([]byte(first), v)
+	}
+	// Not cleanly recoverable — surface the genuine parse error.
+	return json.Unmarshal([]byte(arguments), v)
+}
+
 func executeToolCall(ctx context.Context, registry *tools.Registry, call ToolCall, permissionMode PermissionMode, options Options) (ToolResult, error) {
 	args := map[string]any{}
 	if call.Arguments != "" {
-		if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
+		if err := decodeToolArguments(call.Arguments, &args); err != nil {
 			return ToolResult{
 				ToolCallID: call.ID,
 				Name:       call.Name,
