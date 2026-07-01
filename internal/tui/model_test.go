@@ -1108,24 +1108,73 @@ func TestPromptSubmitDoesNotStartAnotherRunWhilePending(t *testing.T) {
 	}
 }
 
-func TestEscCancelsPendingRun(t *testing.T) {
+func TestEscRequiresSecondPressToCancelPendingRun(t *testing.T) {
 	m := newModel(context.Background(), Options{})
 	cancelled := false
 	m.pending = true
 	m.activeRunID = 1
 	m.runCancel = func() { cancelled = true }
 
-	updated, _ := m.Update(testKey(tea.KeyEsc))
+	updated, cmd := m.Update(testKey(tea.KeyEsc))
 	next := updated.(model)
 
+	if cancelled {
+		t.Fatal("first Esc should not cancel the pending run")
+	}
+	if !next.pending {
+		t.Fatal("first Esc should leave the run pending")
+	}
+	if !next.cancelConfirmActive {
+		t.Fatal("first Esc should arm cancel confirmation")
+	}
+	if cmd == nil {
+		t.Fatal("first Esc should schedule confirmation expiry")
+	}
+	status := plainRender(t, next.statusLine(80))
+	if !strings.Contains(status, escCancelConfirmText) {
+		t.Fatalf("status line = %q, want cancel confirmation", status)
+	}
+
+	updated, _ = next.Update(testKey(tea.KeyEsc))
+	next = updated.(model)
+
 	if !cancelled {
-		t.Fatal("expected Esc to cancel pending run")
+		t.Fatal("second Esc should cancel pending run")
 	}
 	if next.pending {
-		t.Fatal("expected Esc to clear pending state")
+		t.Fatal("expected second Esc to clear pending state")
 	}
 	if next.activeRunID != 0 || next.runCancel != nil {
 		t.Fatalf("expected active run state to clear, got id=%d cancel=%v", next.activeRunID, next.runCancel)
+	}
+	if next.cancelConfirmActive {
+		t.Fatal("cancelling should clear cancel confirmation")
+	}
+}
+
+func TestEscCancelConfirmationExpires(t *testing.T) {
+	m := newModel(context.Background(), Options{})
+	m.pending = true
+	m.activeRunID = 1
+	m.runCancel = func() {}
+
+	updated, _ := m.Update(testKey(tea.KeyEsc))
+	next := updated.(model)
+	seq := next.cancelConfirmSeq
+
+	updated, _ = next.Update(cancelConfirmExpiredMsg{seq: seq - 1})
+	next = updated.(model)
+	if !next.cancelConfirmActive {
+		t.Fatal("stale expiry should not clear active cancel confirmation")
+	}
+
+	updated, _ = next.Update(cancelConfirmExpiredMsg{seq: seq})
+	next = updated.(model)
+	if next.cancelConfirmActive {
+		t.Fatal("matching expiry should clear cancel confirmation")
+	}
+	if !next.pending {
+		t.Fatal("expiring the confirmation should not cancel the run")
 	}
 }
 
