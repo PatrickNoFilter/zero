@@ -1152,6 +1152,71 @@ func TestEscRequiresSecondPressToCancelPendingRun(t *testing.T) {
 	}
 }
 
+// TestEscArmingCancelConfirmationPreservesComposerDraft: the first Esc only
+// arms the confirmation — nothing has actually been cancelled yet, so it
+// must not destroy a draft the user is still typing. Only the confirming
+// second Esc (the one that actually cancels the run) clears the composer.
+func TestEscArmingCancelConfirmationPreservesComposerDraft(t *testing.T) {
+	m := newModel(context.Background(), Options{})
+	m.pending = true
+	m.activeRunID = 1
+	m.runCancel = func() {}
+	m.input.SetValue("draft prompt")
+
+	updated, _ := m.Update(testKey(tea.KeyEsc))
+	next := updated.(model)
+
+	if !next.cancelConfirmActive {
+		t.Fatal("first Esc should arm cancel confirmation")
+	}
+	if next.composerValue() != "draft prompt" {
+		t.Fatalf("first Esc should preserve the draft, got %q", next.composerValue())
+	}
+
+	updated, _ = next.Update(testKey(tea.KeyEsc))
+	next = updated.(model)
+
+	if next.pending {
+		t.Fatal("second Esc should cancel the pending run")
+	}
+	if next.composerValue() != "" {
+		t.Fatalf("the confirming second Esc should clear the draft, got %q", next.composerValue())
+	}
+}
+
+// TestPasteDisarmsCancelConfirmation: a paste isn't a keypress, so it never
+// went through the generic "any non-Esc key disarms it" hook. Pasting is a
+// deliberate action just like typing or clicking — it must disarm a stale
+// confirmation too, or a later, unrelated Esc could silently cancel the run.
+func TestPasteDisarmsCancelConfirmation(t *testing.T) {
+	m := newModel(context.Background(), Options{})
+	cancelled := false
+	m.pending = true
+	m.activeRunID = 1
+	m.runCancel = func() { cancelled = true }
+
+	updated, _ := m.Update(testKey(tea.KeyEsc))
+	next := updated.(model)
+	if !next.cancelConfirmActive {
+		t.Fatal("first Esc should arm cancel confirmation")
+	}
+
+	updated, _ = next.Update(testPaste("pasted text"))
+	next = updated.(model)
+	if next.cancelConfirmActive {
+		t.Fatal("a paste should disarm the stale cancel confirmation")
+	}
+
+	updated, _ = next.Update(testKey(tea.KeyEsc))
+	next = updated.(model)
+	if cancelled {
+		t.Fatal("Esc after a paste should re-arm, not immediately cancel")
+	}
+	if !next.cancelConfirmActive {
+		t.Fatal("Esc after a paste should arm a fresh confirmation")
+	}
+}
+
 func TestEscCancelConfirmationExpires(t *testing.T) {
 	m := newModel(context.Background(), Options{})
 	m.pending = true

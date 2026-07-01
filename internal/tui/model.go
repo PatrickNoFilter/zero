@@ -1108,13 +1108,16 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.hasQueuedMessage() {
 				return m.clearQueuedMessage(), nil
 			}
-			m.clearComposer()
 			m.clearSuggestions()
 			if m.pending {
 				if wasConfirmingCancel {
+					m.clearComposer()
 					m.cancelRun()
 					return m, nil
 				}
+				// First Esc only arms the confirmation — preserve whatever
+				// draft the user has typed, since nothing has actually been
+				// cancelled yet and they may not press Esc again.
 				m.cancelConfirmActive = true
 				m.cancelConfirmSeq++
 				seq := m.cancelConfirmSeq
@@ -1122,6 +1125,7 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return cancelConfirmExpiredMsg{seq: seq}
 				})
 			}
+			m.clearComposer()
 			return m, nil
 		case keyIs(msg, tea.KeyEnter):
 			if m.transcriptDetailed {
