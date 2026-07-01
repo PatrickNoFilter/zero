@@ -40,6 +40,13 @@ const chatWheelScrollLines = 5
 const ctrlCExitConfirmDuration = 3 * time.Second
 const ctrlCExitConfirmText = "Press Ctrl+C again to exit"
 
+// dragEdgeScrollInterval/dragEdgeScrollStep drive the smooth-glide auto-scroll
+// while a drag holds past the transcript edge (see edgeScrollDelta). A small step
+// on a short, steady cadence reads as a smooth continuous scroll; the wheel-scroll
+// tick size (chatWheelScrollLines) would jump too far per step for that.
+const dragEdgeScrollInterval = 70 * time.Millisecond
+const dragEdgeScrollStep = 1
+
 type model struct {
 	ctx                    context.Context
 	cwd                    string
@@ -289,6 +296,22 @@ type model struct {
 	copyStatusSeq     int
 	exitConfirmActive bool
 	exitConfirmSeq    int
+	// edgeScrollDelta drives the smooth-glide auto-scroll while a drag holds past
+	// the transcript's top/bottom edge: 0 when idle, else the signed per-tick step
+	// (matches transcriptEdgeScrollDelta's sign convention). A self-scheduling
+	// tea.Tick chain (see dragEdgeScrollTickCmd) keeps stepping it at a fixed small
+	// increment regardless of whether new raw mouse-motion events arrive — a
+	// terminal only reports motion on actual cursor movement, so without a timer
+	// the scroll would stop dead the instant the physical mouse holds still, even
+	// while parked past the edge. edgeScrollSeq invalidates a stale in-flight tick
+	// (mirroring exitConfirmSeq/copyStatusSeq) whenever the drag moves back into
+	// the body, releases, or the chain is otherwise stopped.
+	edgeScrollDelta int
+	edgeScrollSeq   int
+	// edgeScrollMouseX is the column the tick chain keeps extending the selection
+	// at — captured from the triggering drag since a timer tick carries no mouse
+	// position of its own.
+	edgeScrollMouseX int
 
 	// picker, when non-nil, is an open interactive selector overlay (/model,
 	// /effort with no argument). It captures ↑/↓/Enter/Esc and applies
@@ -332,6 +355,15 @@ type agentTextMsg struct {
 }
 
 type exitConfirmExpiredMsg struct {
+	seq int
+}
+
+// dragEdgeScrollTickMsg advances the smooth-glide auto-scroll one step (see
+// edgeScrollDelta). seq must match m.edgeScrollSeq or the tick is stale (the
+// drag moved back into the body, released, or was otherwise stopped since this
+// tick was scheduled) and is silently dropped — the self-scheduling chain simply
+// doesn't reschedule itself, so it terminates rather than ticking forever.
+type dragEdgeScrollTickMsg struct {
 	seq int
 }
 
@@ -895,6 +927,12 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.exitConfirmActive = false
 		}
 		return m, nil
+	case dragEdgeScrollTickMsg:
+		if msg.seq != m.edgeScrollSeq || m.edgeScrollDelta == 0 || !m.transcriptSelection.active {
+			return m, nil // stale, or the chain was stopped since this tick was scheduled
+		}
+		m = m.dragToEdgeScroll(m.edgeScrollDelta, m.edgeScrollMouseX)
+		return m, dragEdgeScrollTickCmd(m.edgeScrollSeq)
 	case providerWizardOAuthMsg:
 		return m.applyProviderWizardOAuth(msg)
 	case providerWizardDeviceCodeMsg:

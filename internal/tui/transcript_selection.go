@@ -1135,13 +1135,16 @@ func (m model) transcriptEdgeScrollDelta(msg tea.MouseMsg) (int, bool) {
 
 // dragToEdgeScroll scrolls one step toward the edge the drag moved past, then
 // extends the selection cursor to whichever line now sits at THAT edge of the
-// new viewport. It deliberately does NOT try to re-resolve the drag's (still
-// off-screen) physical mouse position — after scrolling, that position is still
-// outside frame.bodyRect (scrolling changes what content occupies a screen row,
-// not the mouse's screen position), so nearestTranscriptLineAtMouse would keep
-// finding nothing. Anchoring to the viewport edge instead is what makes the
-// selection visibly keep pace with the drag while the mouse holds past the edge.
-func (m model) dragToEdgeScroll(delta int, msg tea.MouseMsg) model {
+// new viewport, at column x. It deliberately does NOT try to re-resolve the
+// drag's (still off-screen) physical mouse position — after scrolling, that
+// position is still outside frame.bodyRect (scrolling changes what content
+// occupies a screen row, not the mouse's screen position), so
+// nearestTranscriptLineAtMouse would keep finding nothing. Anchoring to the
+// viewport edge instead is what makes the selection visibly keep pace with the
+// drag while the mouse holds past the edge. Takes a plain column rather than a
+// tea.MouseMsg because the smooth-glide tick chain (dragEdgeScrollTickMsg) calls
+// this repeatedly with no real mouse event of its own — see edgeScrollMouseX.
+func (m model) dragToEdgeScroll(delta int, x int) model {
 	m = m.scrollChat(delta)
 	_, window, layout := m.transcriptHitTestLayout()
 	target := window.start
@@ -1149,8 +1152,51 @@ func (m model) dragToEdgeScroll(delta int, msg tea.MouseMsg) model {
 		target = window.start + window.height - 1
 	}
 	if line, ok := nearestTranscriptSelectableAt(layout, target); ok {
-		m.transcriptSelection.cursor = transcriptSelectionPointForMouse(line, mouseX(msg))
+		m.transcriptSelection.cursor = transcriptSelectionPointForMouse(line, x)
 	}
+	return m
+}
+
+// dragEdgeScrollTickCmd schedules the next step of the smooth-glide edge-scroll,
+// gated by seq (see dragEdgeScrollTickMsg / edgeScrollSeq).
+func dragEdgeScrollTickCmd(seq int) tea.Cmd {
+	return tea.Tick(dragEdgeScrollInterval, func(time.Time) tea.Msg {
+		return dragEdgeScrollTickMsg{seq: seq}
+	})
+}
+
+// startEdgeScroll (re)starts the smooth-glide tick chain in the given direction —
+// a no-op if it's already running the SAME direction (a fresh raw motion event
+// arriving mid-glide must not reset the cadence, or repeated events faster than
+// dragEdgeScrollInterval would make it jerky again, defeating the point). x is
+// remembered for the ticks, which carry no mouse position of their own. Applies
+// one immediate step so there's no perceptible delay between crossing the edge
+// and the first visible movement.
+func (m model) startEdgeScroll(direction int, x int) (model, tea.Cmd) {
+	step := dragEdgeScrollStep
+	if direction < 0 {
+		step = -step
+	}
+	if m.edgeScrollDelta == step {
+		m.edgeScrollMouseX = x
+		return m, nil
+	}
+	m = m.dragToEdgeScroll(step, x)
+	m.edgeScrollDelta = step
+	m.edgeScrollMouseX = x
+	m.edgeScrollSeq++
+	return m, dragEdgeScrollTickCmd(m.edgeScrollSeq)
+}
+
+// stopEdgeScroll ends the smooth-glide tick chain (the drag moved back into the
+// body, off to the side, or released). Bumping edgeScrollSeq invalidates any
+// tick already in flight, so it lands as a no-op and doesn't reschedule itself.
+func (m model) stopEdgeScroll() model {
+	if m.edgeScrollDelta == 0 {
+		return m
+	}
+	m.edgeScrollDelta = 0
+	m.edgeScrollSeq++
 	return m
 }
 
@@ -1232,6 +1278,14 @@ func (m model) handleTranscriptSelectionMouse(msg tea.MouseMsg) (model, tea.Cmd,
 		point := transcriptSelectionPointForMouse(line, mouseX(msg))
 		m.copyStatus = ""
 		m.transcriptSelection = transcriptSelectionState{active: true, anchor: point, cursor: point}
+		// A fresh press always starts a brand-new drag: reset any glide state left
+		// over from a PREVIOUS selection that ended without going through
+		// stopEdgeScroll (e.g. a keypress mid-drag clears transcriptSelection.active
+		// directly, model.go's KeyPressMsg handler). Without this, a stale
+		// edgeScrollDelta can coincidentally match this new drag's direction and
+		// fool startEdgeScroll's "already running" fast path into silently doing
+		// nothing for the whole hold.
+		m = m.stopEdgeScroll()
 		return m, nil, true
 	case mouseMotion(msg):
 		if !m.transcriptSelection.active {
@@ -1239,18 +1293,34 @@ func (m model) handleTranscriptSelectionMouse(msg tea.MouseMsg) (model, tea.Cmd,
 		}
 		if line, ok := m.transcriptLineAtMouse(msg); ok {
 			m.transcriptSelection.cursor = transcriptSelectionPointForMouse(line, mouseX(msg))
+			m = m.stopEdgeScroll() // back inside the body: any running glide ends
 			return m, nil, true
 		}
 		// The drag moved past the top/bottom edge of the visible transcript:
 		// auto-scroll toward that side and extend the selection to follow.
-		if delta, ok := m.transcriptEdgeScrollDelta(msg); ok {
-			m = m.dragToEdgeScroll(delta, msg)
+		delta, ok := m.transcriptEdgeScrollDelta(msg)
+		if !ok {
+			m = m.stopEdgeScroll() // off to the side (e.g. over the sidebar), not an edge case
+			return m, nil, true
 		}
-		return m, nil, true
+		if m.reducedMotion {
+			// No animated glide: a single, larger step per raw motion event,
+			// matching the app's reduced-motion convention elsewhere.
+			m = m.dragToEdgeScroll(delta, mouseX(msg))
+			return m, nil, true
+		}
+		direction := 1
+		if delta < 0 {
+			direction = -1
+		}
+		var cmd tea.Cmd
+		m, cmd = m.startEdgeScroll(direction, mouseX(msg))
+		return m, cmd, true
 	case mouseRelease(msg):
 		if !m.transcriptSelection.active {
 			return m, nil, false
 		}
+		m = m.stopEdgeScroll()
 		if line, ok := m.transcriptLineAtMouse(msg); ok {
 			m.transcriptSelection.cursor = transcriptSelectionPointForMouse(line, mouseX(msg))
 		}
