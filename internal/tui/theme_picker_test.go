@@ -2,10 +2,10 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,8 +28,16 @@ func TestThemeChoicePersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("theme commit should have written config: %v", err)
 	}
-	if !strings.Contains(string(data), "dracula") {
-		t.Fatalf("config does not record the theme:\n%s", data)
+	var cfg struct {
+		Preferences struct {
+			Theme string `json:"theme"`
+		} `json:"preferences"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("config is not valid JSON: %v", err)
+	}
+	if cfg.Preferences.Theme != "dracula" {
+		t.Fatalf("preferences.theme = %q, want dracula", cfg.Preferences.Theme)
 	}
 
 	// Second session: the persisted theme seeds startup (no flag / env).

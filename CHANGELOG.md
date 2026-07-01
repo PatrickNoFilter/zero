@@ -17,7 +17,8 @@ tagged. Until then, source builds report the version `dev`.
   `tokyo-night`, `catppuccin`, `one-dark`, `solarized-dark`, `rose-pine`, `everforest`, and
   `solarized-light` — selectable via `/theme <name>`, `--theme <name>`, or `ZERO_THEME`. Every palette
   is contrast-audited to WCAG AA. The built-in light theme was reworked for legibility.
-- `--theme {auto|dark|light}` flag for the TUI (previously only the `ZERO_THEME` env var existed).
+- `--theme <name>` flag for the TUI, accepting `auto` or any registered theme (previously only the
+  `ZERO_THEME` env var existed).
 - "Accessibility / Appearance" section in the README documenting `NO_COLOR`, `ZERO_THEME`, `/theme`,
   and `ZERO_NO_FADE`.
 
