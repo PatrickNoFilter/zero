@@ -269,6 +269,7 @@ func TestNewRoutesChatGPTCatalogToCodexProvider(t *testing.T) {
 	// OAuth token and the "want empty chatgpt-account-id" assertion fails locally
 	// (it still passes in CI, where no login is stored). Mirrors the isolation in
 	// TestNewRoutesChatGPTCatalogWithStoredAccountID.
+	t.Setenv("ZERO_OAUTH_STORAGE", "file")
 	t.Setenv("ZERO_OAUTH_TOKENS_PATH", t.TempDir()+"/tokens.json")
 
 	transport := &captureTransport{
@@ -323,11 +324,9 @@ func TestNewRoutesChatGPTCatalogToCodexProvider(t *testing.T) {
 func TestNewRoutesChatGPTCatalogWithStoredAccountID(t *testing.T) {
 	// The factory reads the stored OAuth token's Account field for the
 	// chatgpt-account-id header, from the login key the CALLER supplies in
-	// Options.OAuthLoginKey (the same key the bearer resolver bound). Seed a token
-	// in a temp store and point ZERO_OAUTH_TOKENS_PATH at it, then pass that key.
-	dir := t.TempDir()
-	t.Setenv("ZERO_OAUTH_TOKENS_PATH", dir+"/tokens.json")
-	store, err := newOAuthStoreForTest()
+	// Options.OAuthLoginKey (the same key the bearer resolver bound). Seed a
+	// token in an isolated temp store, then pass that key.
+	store, err := newOAuthStoreForTest(t)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
@@ -409,11 +408,16 @@ func (transport *captureTransport) body() io.Reader {
 	return strings.NewReader(transport.requestBody)
 }
 
-// newOAuthStoreForTest builds a Store pointed at the current
-// ZERO_OAUTH_TOKENS_PATH (set by the caller). It exists so the chatgpt
-// factory tests can seed a token without copying the path-handling dance
-// from internal/cli.
-func newOAuthStoreForTest() (*oauth.Store, error) {
+// newOAuthStoreForTest pins the OAuth token store to a plain temp FILE and
+// returns a Store on it. Pinning ZERO_OAUTH_STORAGE matters as much as the
+// path: an inherited "keyring" value would send NewStore to the OS keychain
+// and ignore ZERO_OAUTH_TOKENS_PATH entirely, making the test read/write the
+// developer's real logins. Exists so the chatgpt factory tests can seed a
+// token without copying the path-handling dance from internal/cli.
+func newOAuthStoreForTest(t *testing.T) (*oauth.Store, error) {
+	t.Helper()
+	t.Setenv("ZERO_OAUTH_STORAGE", "file")
+	t.Setenv("ZERO_OAUTH_TOKENS_PATH", t.TempDir()+"/tokens.json")
 	return oauth.NewStore(oauth.StoreOptions{})
 }
 
@@ -425,9 +429,7 @@ func newOAuthStoreForTest() (*oauth.Store, error) {
 // account claim under the SAME key) is picked up; an empty key (no OAuth login)
 // or a missing/account-less token yields "".
 func TestCodexAccountForKey(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("ZERO_OAUTH_TOKENS_PATH", dir+"/tokens.json")
-	store, err := newOAuthStoreForTest()
+	store, err := newOAuthStoreForTest(t)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}

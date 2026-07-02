@@ -1198,6 +1198,13 @@ func containsString(values []string, want string) bool {
 func TestApplyProviderWizardExportsActiveProviderEnv(t *testing.T) {
 	t.Setenv(config.ActiveProviderEnv, "stale-previous-provider")
 	m := newModel(context.Background(), Options{})
+	// Isolate the SUCCESS path's persist to a temp config (the default empty
+	// path would skip persist; a future default must never reach the real user
+	// config), and stub the build so the full commit sequence runs.
+	m.userConfigPath = filepath.Join(t.TempDir(), "config.json")
+	m.newProvider = func(config.ProviderProfile) (zeroruntime.Provider, error) {
+		return &fakeProvider{}, nil
+	}
 	m.providerWizard = &providerWizardState{
 		step:        providerWizardStepModel,
 		profileName: "acme-wizard",
