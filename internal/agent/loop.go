@@ -412,7 +412,7 @@ func Run(ctx context.Context, prompt string, provider Provider, options Options)
 				// above) — say so, instead of the generic no-progress message
 				// that reads as the agent giving up.
 				if guards.allEmptyTurnsProviderEmpty() {
-					result.FinalAnswer = providerEmptyStopAnswer(result.Turns)
+					result.FinalAnswer = providerEmptyStopAnswer(result.Turns, emptyStreamDetail(collected))
 					result.Messages = copyMessages(messages)
 					return result, nil
 				}

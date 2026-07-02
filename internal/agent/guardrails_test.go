@@ -503,6 +503,11 @@ func TestRunRetriesProviderEmptyStreamsThenStopsWithProviderMessage(t *testing.T
 	if !IsNoProgressStop(result.FinalAnswer) {
 		t.Fatal("the provider-empty stop answer must be recognized by IsNoProgressStop (titling/resume filters)")
 	}
+	// Wire-level diagnostics must land in the message (and therefore the
+	// session log) so this failure class is debuggable without a traffic capture.
+	if !strings.Contains(result.FinalAnswer, "output_tokens=0") || !strings.Contains(result.FinalAnswer, "finish_reason=") {
+		t.Fatalf("stop answer must carry last-attempt diagnostics, got %q", result.FinalAnswer)
+	}
 }
 
 // A transient empty response recovers on the in-turn retry: no strike, no stop,

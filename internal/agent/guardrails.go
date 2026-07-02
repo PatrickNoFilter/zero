@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -315,10 +316,29 @@ func noOutputStopAnswer(turns int) string {
 // provider-empty stream: the backend repeatedly answered with contentless
 // completions (already retried with backoff inside each turn). It tells the
 // user the truth — the provider failed, not the agent — and what to do next.
-func providerEmptyStopAnswer(turns int) string {
-	return providerEmptyStopPrefix +
+// detail carries wire-level diagnostics from the last empty attempt
+// (finish reason, token counts) so the condition is debuggable straight from
+// the session log — this exact failure class previously took a live traffic
+// capture to diagnose because nothing about the response shape was recorded.
+func providerEmptyStopAnswer(turns int, detail string) string {
+	answer := providerEmptyStopPrefix +
 		strconv.Itoa(turns) + " consecutive attempts, each already retried with backoff. " +
 		"The backend is likely rate-limiting or degraded right now — try again shortly, or switch providers/models (zero providers use <name>)."
+	if detail != "" {
+		answer += " [last attempt: " + detail + "]"
+	}
+	return answer
+}
+
+// emptyStreamDetail renders the wire-level shape of an empty attempt for
+// providerEmptyStopAnswer.
+func emptyStreamDetail(collected zeroruntime.CollectedStream) string {
+	finish := collected.FinishReason
+	if finish == "" {
+		finish = "stop"
+	}
+	return fmt.Sprintf("finish_reason=%s, output_tokens=%d, reasoning_tokens=%d",
+		finish, collected.Usage.OutputTokens, collected.Usage.ReasoningTokens)
 }
 
 // providerEmptyStopPrefix is the stable head of providerEmptyStopAnswer, used
