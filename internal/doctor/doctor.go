@@ -129,11 +129,11 @@ func Format(report Report) string {
 // part: it lets a user see which binary answered (e.g. an npm-installed one vs a
 // stale/shadowing copy on PATH) rather than a meaningless green.
 func runtimeCheck(options Options) Check {
-	runtime := strings.TrimSpace(options.Runtime)
-	if runtime == "" {
-		runtime = "go"
+	runtimeVersion := strings.TrimSpace(options.Runtime)
+	if runtimeVersion == "" {
+		runtimeVersion = "go"
 	}
-	details := map[string]any{"runtime": runtime}
+	details := map[string]any{"runtime": runtimeVersion}
 
 	executable := options.Executable
 	if executable == nil {
@@ -153,14 +153,14 @@ func runtimeCheck(options Options) Check {
 	info, err := stat(path)
 	if err != nil {
 		return check("runtime.go", "Zero native binary", StatusFail,
-			fmt.Sprintf("The running Zero binary is not accessible at %s: %s. Reinstall the zero package or build from source.", path, err.Error()), details)
+			fmt.Sprintf("The running Zero binary is not accessible at %s: %s. Reinstall the zero package, or build from source: https://github.com/Gitlawb/zero", path, err.Error()), details)
 	}
 	if info.IsDir() {
 		return check("runtime.go", "Zero native binary", StatusFail,
 			fmt.Sprintf("The resolved Zero binary path %s is a directory, not an executable.", path), details)
 	}
 	return check("runtime.go", "Zero native binary", StatusPass,
-		fmt.Sprintf("Zero native binary is present and runnable at %s (%s).", path, runtime), details)
+		fmt.Sprintf("Zero native binary is present and runnable at %s (%s).", path, runtimeVersion), details)
 }
 
 func configFilesCheck(userPath string, projectPath string) Check {
