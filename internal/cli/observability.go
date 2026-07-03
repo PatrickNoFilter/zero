@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -65,7 +66,7 @@ func runDoctor(args []string, stdout io.Writer, stderr io.Writer, deps appDeps) 
 
 	report := doctor.Run(doctor.Options{
 		Now:            deps.now,
-		Runtime:        "go",
+		Runtime:        runtime.Version(),
 		UserConfig:     userConfig,
 		ProjectConfig:  projectConfig,
 		Provider:       provider,

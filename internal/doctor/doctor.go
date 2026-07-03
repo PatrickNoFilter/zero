@@ -57,6 +57,11 @@ type Options struct {
 	// LSP-server checks. Nil means exec.LookPath; tests inject a stub so the
 	// checks are deterministic regardless of the host's installed tooling.
 	LookupExecutable func(string) (string, error)
+	// Executable resolves the running Zero binary's path (nil => os.Executable)
+	// and StatExecutable stats it (nil => os.Stat). Injected so the native-binary
+	// runtime check is testable without depending on a real on-disk layout.
+	Executable     func() (string, error)
+	StatExecutable func(string) (os.FileInfo, error)
 }
 
 func Run(options Options) Report {
@@ -65,7 +70,7 @@ func Run(options Options) Report {
 		now = time.Now
 	}
 	checks := []Check{
-		runtimeCheck(options.Runtime),
+		runtimeCheck(options),
 		configFilesCheck(options.UserConfig, options.ProjectConfig),
 		configValidationCheck(options.UserConfig, options.ProjectConfig),
 	}
@@ -114,12 +119,48 @@ func Format(report Report) string {
 	return strings.Join(lines, "\n")
 }
 
-func runtimeCheck(runtime string) Check {
-	runtime = strings.TrimSpace(runtime)
+// runtimeCheck verifies the running Zero native binary is actually present and
+// runnable, and reports its resolved path — instead of the former hardcoded
+// always-pass, which claimed "Go runtime is available" while checking nothing
+// (#405). doctor executes INSIDE the native binary, so this only fails if
+// os.Executable can't resolve or the running file has vanished; the missing-
+// binary-at-install case is caught earlier by the npm wrapper, which refuses to
+// launch without the platform binary. Surfacing the binary PATH is the useful
+// part: it lets a user see which binary answered (e.g. an npm-installed one vs a
+// stale/shadowing copy on PATH) rather than a meaningless green.
+func runtimeCheck(options Options) Check {
+	runtime := strings.TrimSpace(options.Runtime)
 	if runtime == "" {
 		runtime = "go"
 	}
-	return check("runtime.go", "Go runtime", StatusPass, fmt.Sprintf("Zero Go runtime is available (%s).", runtime), map[string]any{"runtime": runtime})
+	details := map[string]any{"runtime": runtime}
+
+	executable := options.Executable
+	if executable == nil {
+		executable = os.Executable
+	}
+	path, err := executable()
+	if err != nil {
+		return check("runtime.go", "Zero native binary", StatusFail,
+			"Could not resolve the running Zero binary: "+err.Error(), details)
+	}
+	details["binaryPath"] = path
+
+	stat := options.StatExecutable
+	if stat == nil {
+		stat = os.Stat
+	}
+	info, err := stat(path)
+	if err != nil {
+		return check("runtime.go", "Zero native binary", StatusFail,
+			fmt.Sprintf("The running Zero binary is not accessible at %s: %s. Reinstall the zero package or build from source.", path, err.Error()), details)
+	}
+	if info.IsDir() {
+		return check("runtime.go", "Zero native binary", StatusFail,
+			fmt.Sprintf("The resolved Zero binary path %s is a directory, not an executable.", path), details)
+	}
+	return check("runtime.go", "Zero native binary", StatusPass,
+		fmt.Sprintf("Zero native binary is present and runnable at %s (%s).", path, runtime), details)
 }
 
 func configFilesCheck(userPath string, projectPath string) Check {
