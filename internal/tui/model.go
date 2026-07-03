@@ -1068,7 +1068,7 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.disarmCancelConfirmation()
 		}
 		// The `?` help overlay is modal: `?`, Esc, q, or Enter close it; every
-		// other key is swallowed so nothing types into the hidden composer.
+		// other key is swallowed so nothing types into the composer behind it.
 		if m.helpOverlay {
 			if keyText(msg) == "?" || keyText(msg) == "q" || keyIs(msg, tea.KeyEsc) || keyIs(msg, tea.KeyEnter) || keyCtrl(msg, 'c') {
 				m.helpOverlay = false
@@ -2118,8 +2118,6 @@ func (m model) View() tea.View {
 	var content string
 	if m.setup.visible {
 		content = m.setupView(chatWidth(m.width))
-	} else if m.helpOverlay {
-		content = m.renderKeybindingHelpOverlay(chatWidth(m.width), m.height)
 	} else if m.transcriptDetailed {
 		content = m.detailedTranscriptView()
 	} else {
@@ -2194,6 +2192,7 @@ func (m model) transcriptView() string {
 		return body + footer
 	}
 
+	helpOverlay := m.keybindingHelpOverlay(width)
 	suggestionOverlay := m.suggestionOverlay(width)
 	providerOverlay := m.providerWizardOverlay(width)
 	mcpAddOverlay := m.mcpAddWizardOverlay(width)
@@ -2201,6 +2200,8 @@ func (m model) transcriptView() string {
 	pickerOverlay := m.pickerOverlay(width)
 	viewportOverlay := ""
 	switch {
+	case helpOverlay != "":
+		viewportOverlay = helpOverlay
 	case providerOverlay != "":
 		viewportOverlay = providerOverlay
 	case mcpAddOverlay != "":
@@ -2261,6 +2262,11 @@ func (m model) twoColumnTranscriptView() string {
 	overlayForViewport := suggestionOverlay
 	if m.transcriptEmpty() && !m.pending {
 		overlayForViewport = ""
+	}
+	// The `?` help overlay composites over the chat like the pickers — set it
+	// after the empty-transcript clear so a user-toggled overlay always shows.
+	if helpOverlay := m.keybindingHelpOverlay(width); helpOverlay != "" {
+		overlayForViewport = helpOverlay
 	}
 
 	header := m.pinnedTitleBar(width)

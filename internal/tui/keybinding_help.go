@@ -133,6 +133,18 @@ func (m model) renderKeybindingHelpOverlay(width int, height int) string {
 	return centerRenderedBlock(block, width)
 }
 
+// keybindingHelpOverlay returns the `?` shortcut overlay as a centered block to
+// COMPOSITE over the transcript — the same viewport-overlay path the model
+// picker and suggestions use — or "" when it is not open. Rendering it this way
+// (rather than replacing the whole View) keeps the chat visible behind it, so
+// `?` behaves like every other popup instead of blanking the screen (#419).
+func (m model) keybindingHelpOverlay(width int) string {
+	if !m.helpOverlay {
+		return ""
+	}
+	return m.renderKeybindingHelpOverlay(width, m.height)
+}
+
 // keybindingHelpOverlayWidth picks the overlay width: wide enough that the
 // descriptions don't truncate next to the key column, capped, and never wider
 // than the terminal.
