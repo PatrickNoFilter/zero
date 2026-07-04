@@ -326,9 +326,14 @@ type model struct {
 	// mouse cursor with no button pressed, so it renders in a distinct style —
 	// the visual cue that it's clickable. Requires AllMotion mouse reporting
 	// (see wantsMouseCapture) since idle cursor movement carries no button.
-	hover             hoverTarget
-	copyStatus        string
-	copyStatusSeq     int
+	hover         hoverTarget
+	copyStatus    string
+	copyStatusSeq int
+	// fastToast is a transient /fast notice shown in the row above the composer for
+	// fastToastDuration, then auto-cleared (seq-gated). It keeps ephemeral fast-lane
+	// feedback out of the persistent transcript.
+	fastToast         string
+	fastToastSeq      int
 	exitConfirmActive bool
 	exitConfirmSeq    int
 	// cancelConfirmActive/cancelConfirmSeq mirror exitConfirmActive/exitConfirmSeq
@@ -1013,6 +1018,11 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case transcriptCopyStatusExpiredMsg:
 		if msg.seq == m.copyStatusSeq {
 			m.copyStatus = ""
+		}
+		return m, nil
+	case fastToastExpiredMsg:
+		if msg.seq == m.fastToastSeq {
+			m.fastToast = ""
 		}
 		return m, nil
 	case exitConfirmExpiredMsg:
@@ -2347,7 +2357,9 @@ func (m model) footerView(width int) string {
 	// a faint idle affordance — discoverable key hints on the left, a jump-to-bottom
 	// cue on the right when scrolled up. Always one line (blank when nothing shows),
 	// so the footer height is unchanged.
-	if copyStatus := strings.TrimSpace(m.copyStatus); copyStatus != "" {
+	if toast := strings.TrimSpace(m.fastToast); toast != "" {
+		footer.WriteString(rightAlignedLine(renderFastToast(toast), width))
+	} else if copyStatus := strings.TrimSpace(m.copyStatus); copyStatus != "" {
 		footer.WriteString(rightAlignedLine(zeroTheme.ink.Render(copyStatus), width))
 	} else if left, right := m.composerIdleHint(), m.jumpToBottomHint(); left != "" || right != "" {
 		footer.WriteString(fitStyledLine(joinHeaderLine("  "+left, right, width), width))
@@ -3817,8 +3829,9 @@ func (m model) handleSubmit() (tea.Model, tea.Cmd) {
 	case commandFast:
 		var text string
 		m, text = m.handleFastCommand(command.text)
-		m.transcript = reduceTranscript(m.transcript, transcriptAction{kind: actionAppendSystem, text: text})
-		return m, nil
+		// Fast-lane feedback is ephemeral: show it as a transient toast above the
+		// composer (auto-dismissed) instead of a permanent transcript line.
+		return m.showFastToast(text)
 	case commandStyle:
 		text := ""
 		m, text = m.handleStyleCommand(command.text)

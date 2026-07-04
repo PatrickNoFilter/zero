@@ -153,16 +153,23 @@ func (m model) titlePRSegment() string {
 func (m model) titleModelSegment() string {
 	provider := strings.TrimSpace(m.providerDisplayName())
 	model := strings.TrimSpace(m.modelName)
+	var segment string
 	switch {
 	case provider == "" && model == "":
 		return zeroTheme.muted.Render("no provider")
 	case model == "":
 		return zeroTheme.ink.Render(provider)
 	case provider == "":
-		return zeroTheme.ink.Render(model)
+		segment = zeroTheme.ink.Render(model)
 	default:
-		return zeroTheme.ink.Render(provider + "/" + model)
+		segment = zeroTheme.ink.Render(provider + "/" + model)
 	}
+	// Mark the active model with a quiet "f" when a fast variant is available, so
+	// the user knows /fast is on offer here without opening a picker.
+	if _, ok := m.currentModelFastVariant(); ok {
+		segment += renderFastBadge(zeroTheme.accent)
+	}
+	return segment
 }
 
 func (m model) composerDividerLine(width int) string {
@@ -866,6 +873,9 @@ func modelPickerOverlayWidth(terminalWidth int, picker *commandPicker) int {
 			if item.Favorite {
 				labelWidth += lipgloss.Width("* ")
 			}
+			if strings.TrimSpace(item.FastVariant) != "" {
+				labelWidth += lipgloss.Width(renderFastBadge(zeroTheme.accent))
+			}
 			target = maxInt(target, lipgloss.Width("❯ ")+labelWidth)
 			if detail := modelPickerItemDetail(item); detail != "" {
 				target = maxInt(target, lipgloss.Width("  "+detail))
@@ -902,6 +912,11 @@ func renderModelPickerRow(width int, selected bool, item pickerItem) string {
 		prefix = "* "
 	}
 	left := marker + surface(zeroTheme.ink).Render(prefix+label)
+	// A quiet "f" badge marks rows whose model has a fast variant; the focused-row
+	// detail line spells out the target and command.
+	if strings.TrimSpace(item.FastVariant) != "" {
+		left += renderFastBadge(surface(zeroTheme.accent))
+	}
 	// The provider is shown as a section header above each group, so rows no longer
 	// repeat it as a right-aligned tag (matches a grouped provider+model list).
 	return fillPaletteLine(left, width, surface)
@@ -916,6 +931,9 @@ func modelPickerItemDetail(item pickerItem) string {
 	}
 	if meta := strings.TrimSpace(item.Meta); meta != "" {
 		parts = append(parts, meta)
+	}
+	if hint := fastVariantHint(item.FastVariant); hint != "" {
+		parts = append(parts, hint)
 	}
 	return strings.Join(parts, " · ")
 }

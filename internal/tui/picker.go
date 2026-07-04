@@ -43,6 +43,10 @@ type pickerItem struct {
 	Remote        bool
 	Local         bool
 	Favorite      bool
+	// FastVariant is the display name of this model's faster same-family variant
+	// (empty when it has none). Set only for /model rows; drives the "f" fast-mode
+	// badge and the focused-row "⚡ fast: … · /fast on" hint.
+	FastVariant string
 }
 
 // commandPicker is a generic single-select overlay reused by /model and /effort
@@ -155,7 +159,33 @@ func (m model) newModelPicker() *commandPicker {
 	if len(items) == 0 {
 		return nil
 	}
+	decorateFastVariantItems(registry, items)
 	return &commandPicker{kind: pickerModel, title: "Choose a model", items: items, allItems: append([]pickerItem{}, items...), selected: 0}
+}
+
+// decorateFastVariantItems stamps each /model row with the display name of its
+// fast variant (if any), in one pass over the assembled list rather than in every
+// item builder. Rows whose model id is not in the curated registry (custom or
+// live-discovered) simply keep an empty FastVariant and show no badge.
+func decorateFastVariantItems(registry modelregistry.Registry, items []pickerItem) {
+	for index := range items {
+		id := strings.TrimSpace(items[index].Value)
+		if id == "" {
+			continue
+		}
+		if fast, ok := registry.FastVariant(id); ok {
+			items[index].FastVariant = fastVariantDisplayName(fast)
+		}
+	}
+}
+
+// fastVariantDisplayName is the user-facing name of a fast variant, preferring
+// its display name and falling back to the id.
+func fastVariantDisplayName(entry modelregistry.ModelEntry) string {
+	if name := strings.TrimSpace(entry.DisplayName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(entry.ID)
 }
 
 // modelPickerProviders returns the providers to list in /model: all saved

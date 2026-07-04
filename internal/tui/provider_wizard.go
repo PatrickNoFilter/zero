@@ -1567,6 +1567,9 @@ func (wizard *providerWizardState) renderSelectableModel(width int, index int, m
 		marker = surface(zeroTheme.accent).Render("❯ ")
 	}
 	left := marker + surface(zeroTheme.ink).Render(model.displayLabel())
+	if _, ok := fastVariantEntryFor(model.ID); ok {
+		left += renderFastBadge(surface(zeroTheme.accent))
+	}
 	return fitStyledLine(left, width)
 }
 
@@ -1577,6 +1580,9 @@ func providerWizardModelDetail(model providerWizardModel) string {
 	}
 	if meta := strings.TrimSpace(model.Meta); meta != "" {
 		parts = append(parts, meta)
+	}
+	if fast, ok := fastVariantEntryFor(model.ID); ok {
+		parts = append(parts, fastVariantHint(fastVariantDisplayName(fast)))
 	}
 	return strings.Join(parts, " · ")
 }

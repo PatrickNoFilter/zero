@@ -33,11 +33,11 @@ func TestPlanFastCommand(t *testing.T) {
 		wantTarget  string // model id expected when the plan switches
 		wantToFast  bool
 	}{
-		{name: "invalid arg", model: "gpt-4.1", arg: "turbo", wantMessage: `Invalid argument "turbo"`},
-		{name: "no model set", model: "", arg: "on", wantMessage: "No model is currently set"},
-		{name: "enable while already fast", model: "gpt-4.1-mini", arg: "on", wantMessage: "Already in fast mode"},
-		{name: "disable while already base", model: "gpt-4.1", arg: "off", wantMessage: "Already using base model"},
-		{name: "enable with no fast variant", model: "claude-opus-4.1", arg: "on", wantMessage: "No fast mode available"},
+		{name: "invalid arg", model: "gpt-4.1", arg: "turbo", wantMessage: `/fast takes on or off, not "turbo"`},
+		{name: "no model set", model: "", arg: "on", wantMessage: "Pick a model first"},
+		{name: "enable while already fast", model: "gpt-4.1-mini", arg: "on", wantMessage: "Already in the fast lane"},
+		{name: "disable while already base", model: "gpt-4.1", arg: "off", wantMessage: "Already on base"},
+		{name: "enable with no fast variant", model: "claude-opus-4.1", arg: "on", wantMessage: "No fast lane"},
 		{name: "enable (no arg) resolves fast", model: "gpt-4.1", arg: "", wantTarget: "gpt-4.1-mini", wantToFast: true},
 		{name: "enable (on) resolves fast", model: "gpt-4.1", arg: "ON", wantTarget: "gpt-4.1-mini", wantToFast: true},
 		{name: "disable resolves base", model: "gpt-4.1-mini", arg: "off", wantTarget: "gpt-4.1", wantToFast: false},
@@ -81,11 +81,11 @@ func TestHandleFastCommandTerminalCases(t *testing.T) {
 		arg          string
 		wantContains string
 	}{
-		{"invalid arg", "gpt-4.1", "sideways", `Invalid argument "sideways"`},
-		{"no model", "", "on", "No model is currently set"},
-		{"already fast", "gpt-4.1-mini", "on", "Already in fast mode"},
-		{"already base", "gpt-4.1", "off", "Already using base model"},
-		{"no fast variant", "claude-opus-4.1", "on", "No fast mode available"},
+		{"invalid arg", "gpt-4.1", "sideways", `/fast takes on or off, not "sideways"`},
+		{"no model", "", "on", "Pick a model first"},
+		{"already fast", "gpt-4.1-mini", "on", "Already in the fast lane"},
+		{"already base", "gpt-4.1", "off", "Already on base"},
+		{"no fast variant", "claude-opus-4.1", "on", "No fast lane"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,16 +136,16 @@ func TestHandleFastCommandSwitchesToFastAndBack(t *testing.T) {
 	if m.modelName != "gpt-4.1-mini" {
 		t.Fatalf("enable: modelName = %q, want gpt-4.1-mini", m.modelName)
 	}
-	if want := "⚡ Switched to " + modelShortName(registry, "gpt-4.1-mini"); notice != want {
-		t.Fatalf("enable notice = %q, want exactly %q (bolt + target short name)", notice, want)
+	if want := "⚡ Fast lane on · " + modelShortName(registry, "gpt-4.1-mini"); notice != want {
+		t.Fatalf("enable notice = %q, want exactly %q (bolt + fast-lane-on + target short name)", notice, want)
 	}
 
 	m, notice = m.handleFastCommand("off")
 	if m.modelName != "gpt-4.1" {
 		t.Fatalf("disable: modelName = %q, want gpt-4.1", m.modelName)
 	}
-	if want := "Switched to " + modelShortName(registry, "gpt-4.1"); notice != want {
-		t.Fatalf("disable notice = %q, want exactly %q (plain, no bolt)", notice, want)
+	if want := "Fast lane off · " + modelShortName(registry, "gpt-4.1"); notice != want {
+		t.Fatalf("disable notice = %q, want exactly %q (plain fast-lane-off, no bolt)", notice, want)
 	}
 }
 
@@ -156,19 +156,19 @@ func TestFastCommandNoOpAndNoVariantMessagesAreDecorated(t *testing.T) {
 	registry := fastTestRegistry(t)
 
 	plan := planFastCommand(registry, "gpt-4.1-mini", "on")
-	if want := "⚡ Already in fast mode (" + modelShortName(registry, "gpt-4.1-mini") + ")"; plan.message != want {
+	if want := "⚡ Already in the fast lane · " + modelShortName(registry, "gpt-4.1-mini"); plan.message != want {
 		t.Fatalf("already-fast message = %q, want %q", plan.message, want)
 	}
 
 	plan = planFastCommand(registry, "gpt-4.1", "off")
-	if want := "Already using base model (" + modelShortName(registry, "gpt-4.1") + ")"; plan.message != want {
+	if want := "Already on base · " + modelShortName(registry, "gpt-4.1"); plan.message != want {
 		t.Fatalf("already-base message = %q, want %q", plan.message, want)
 	}
 
 	// An unknown / off-catalog model id also reaches the no-variant branch, where
 	// <short> falls back to the raw id.
 	plan = planFastCommand(registry, "some-custom-live-provider-model", "on")
-	if want := "No fast mode available for some-custom-live-provider-model"; plan.message != want {
+	if want := "⚡ No fast lane for some-custom-live-provider-model"; plan.message != want {
 		t.Fatalf("no-variant (unknown id) message = %q, want %q", plan.message, want)
 	}
 }
@@ -181,7 +181,7 @@ func TestHandleFastCommandSurfacesSwitchError(t *testing.T) {
 	if got.modelName != "gpt-4.1" {
 		t.Fatalf("model must be unchanged on switch failure, got %q", got.modelName)
 	}
-	if strings.HasPrefix(notice, "⚡ Switched to ") || strings.HasPrefix(notice, "Switched to ") {
+	if strings.HasPrefix(notice, "⚡ Fast lane on ") || strings.HasPrefix(notice, "Fast lane off ") {
 		t.Fatalf("a failed switch must not claim success, got %q", notice)
 	}
 	if strings.TrimSpace(notice) == "" {

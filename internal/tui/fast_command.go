@@ -29,13 +29,13 @@ func planFastCommand(registry modelregistry.Registry, currentModel, arg string) 
 	case "off":
 		enable = false
 	default:
-		return fastPlan{message: fmt.Sprintf("Invalid argument %q. Usage: /fast, /fast on, or /fast off", strings.TrimSpace(arg))}
+		return fastPlan{message: fmt.Sprintf("⚡ /fast takes on or off, not %q", strings.TrimSpace(arg))}
 	}
 
 	// 2. Read the current model.
 	current := strings.TrimSpace(currentModel)
 	if current == "" {
-		return fastPlan{message: "No model is currently set for this session"}
+		return fastPlan{message: "⚡ Pick a model first · /model"}
 	}
 	short := modelShortName(registry, current)
 
@@ -44,10 +44,10 @@ func planFastCommand(registry modelregistry.Registry, currentModel, arg string) 
 
 	// 4. No-op cases — already in the requested state.
 	if enable && isFast {
-		return fastPlan{message: "⚡ Already in fast mode (" + short + ")"}
+		return fastPlan{message: "⚡ Already in the fast lane · " + short}
 	}
 	if !enable && !isFast {
-		return fastPlan{message: "Already using base model (" + short + ")"}
+		return fastPlan{message: "Already on base · " + short}
 	}
 
 	// 5. Resolve the target variant.
@@ -59,7 +59,7 @@ func planFastCommand(registry modelregistry.Registry, currentModel, arg string) 
 		target, ok = registry.BaseVariant(current)
 	}
 	if !ok {
-		return fastPlan{message: "No fast mode available for " + short}
+		return fastPlan{message: "⚡ No fast lane for " + short}
 	}
 
 	// Switching TO a fast model iff the target itself has a base variant.
@@ -94,9 +94,9 @@ func (m model) handleFastCommand(arg string) (model, string) {
 
 	short := modelShortName(registry, plan.targetID)
 	if plan.toFast {
-		return m, "⚡ Switched to " + short
+		return m, "⚡ Fast lane on · " + short
 	}
-	return m, "Switched to " + short
+	return m, "Fast lane off · " + short
 }
 
 // modelShortName returns a model's short display name, falling back to the id
