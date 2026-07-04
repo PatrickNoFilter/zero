@@ -117,6 +117,7 @@ type model struct {
 	selfCorrectTests   bool
 	reasoningEffort    modelregistry.ReasoningEffort
 	responseStyle      string
+	keyBindings        keyBindings
 	themeMode          themeMode // palette preference: auto (default), dark, light
 	hasDarkBg          bool      // last terminal background-detection result (auto mode)
 	userAgent          string
@@ -736,6 +737,7 @@ func newModel(ctx context.Context, options Options) model {
 		permissionMode:              permissionMode,
 		reasoningEffort:             options.ReasoningEffort,
 		responseStyle:               defaultedResponseStyle(options.ResponseStyle),
+		keyBindings:                 resolveKeyBindings(options.KeyBindings),
 		themeMode:                   resolveThemeMode(options.Theme, os.Getenv("ZERO_THEME"), options.SavedTheme),
 		hasDarkBg:                   true,
 		userAgent:                   options.UserAgent,
@@ -1088,7 +1090,7 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case keyCtrl(msg, 'c'):
 			return m.handleCtrlC()
-		case keyCtrl(msg, 'o'):
+		case m.keyMatch(m.keyBindings.toggleDetailed, msg, func(tea.KeyMsg) bool { return keyCtrl(msg, 'o') }):
 			return m.toggleDetailedTranscript(), nil
 		case m.fileView.active && m.noBlockingModal() && m.composerValue() == "" && (keyText(msg) == "d" || keyText(msg) == "f"):
 			// Mode toggle for the file drill-in, only while the composer is empty
@@ -1098,12 +1100,13 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.setFileViewMode(fileViewFull), nil
 			}
 			return m.setFileViewMode(fileViewDiff), nil
-		case keyCtrl(msg, 'e'):
+		case m.keyMatch(m.keyBindings.toggleMouse, msg, func(tea.KeyMsg) bool { return keyCtrl(msg, 'e') }):
 			// Release/recapture the mouse so the user can drag-select and copy text
 			// natively (mouse capture otherwise intercepts terminal selection).
 			m.mouseReleased = !m.mouseReleased
 			if m.mouseReleased {
-				return m.appendSystemNotice("Mouse released — drag to select and copy text. Press Ctrl+E again to re-enable mouse interaction (clicks, right-click paste)."), nil
+				mouseKey := labelOr(m.keyBindings.toggleMouse, "Ctrl+E")
+				return m.appendSystemNotice(fmt.Sprintf("Mouse released — drag to select and copy text. Press %s again to re-enable mouse interaction (clicks, right-click paste).", mouseKey)), nil
 			}
 			return m.appendSystemNotice("Mouse interaction re-enabled."), nil
 		case keyIs(msg, tea.KeyEsc):
@@ -1278,7 +1281,7 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.permissionMode = nextPermissionMode(m.permissionMode)
 				return m, nil
 			}
-		case keyCtrl(msg, 't'):
+		case m.keyMatch(m.keyBindings.cycleReasoning, msg, func(tea.KeyMsg) bool { return keyCtrl(msg, 't') }):
 			if m.transcriptDetailed {
 				return m, nil
 			}
@@ -1291,20 +1294,20 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.noBlockingModal() {
 				return m.cycleReasoningEffort()
 			}
-		case keyCtrl(msg, 'p'):
+		case m.keyMatch(m.keyBindings.togglePlan, msg, func(tea.KeyMsg) bool { return keyCtrl(msg, 'p') }):
 			// Ctrl+P toggles the plan panel expansion (collapse/expand step list).
 			if m.noBlockingModal() && !m.plan.isEmpty() {
 				m.plan.expanded = !m.plan.expanded
 				return m, nil
 			}
-		case keyCtrl(msg, 'b'):
+		case m.keyMatch(m.keyBindings.toggleSidebar, msg, func(tea.KeyMsg) bool { return keyCtrl(msg, 'b') }):
 			// Ctrl+B collapses / restores the right context sidebar. Only acts when
 			// the sidebar would otherwise be on screen (managed mode, wide enough,
 			// real conversation) so it's a no-op — not a confusing notice — on the
 			// home screen or a narrow terminal. Hiding reflows the chat to full
 			// width, so mirror the width-change bookkeeping (re-wrap the streaming
 			// fade, resize the composer) the WindowSizeMsg path does.
-			if m.noBlockingModal() && m.sidebarAvailable() {
+			if m.noBlockingModal() && m.sidebarToggleAllowed() {
 				// Just show/hide — no transcript notice. The reflow IS the feedback,
 				// and emitting a line every toggle piled up noise in the chat.
 				m.sidebarHidden = !m.sidebarHidden
@@ -2380,6 +2383,10 @@ func (m model) composerIdleHint() string {
 		m.subchat.active || m.suggestionsActive() || m.transcriptDetailed {
 		return ""
 	}
+	sidebarKey := labelOr(m.keyBindings.toggleSidebar, "Ctrl+B")
+	detailKey := labelOr(m.keyBindings.toggleDetailed, "Ctrl+O")
+	mouseKey := labelOr(m.keyBindings.toggleMouse, "Ctrl+E")
+
 	var hint string
 	switch widthTier(m.width) {
 	case tierTiny:
@@ -2387,9 +2394,9 @@ func (m model) composerIdleHint() string {
 	case tierNarrow:
 		hint = "? shortcuts"
 	case tierMedium:
-		hint = "? shortcuts · Ctrl+B sidebar · Ctrl+E copy"
+		hint = fmt.Sprintf("? shortcuts · %s sidebar · %s copy", sidebarKey, mouseKey)
 	default:
-		hint = "? shortcuts · Ctrl+B sidebar · Ctrl+O detail · Ctrl+E copy · Shift+Tab mode"
+		hint = fmt.Sprintf("? shortcuts · %s sidebar · %s detail · %s copy · Shift+Tab mode", sidebarKey, detailKey, mouseKey)
 	}
 	return zeroTheme.faint.Render(hint)
 }
