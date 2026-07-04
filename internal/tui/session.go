@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -220,9 +221,11 @@ func (m model) sessionPrompt(prompt string) string {
 
 func (m model) resolveResumeSession(args string) (*sessions.Metadata, error) {
 	if strings.EqualFold(args, "latest") {
-		// Latest *resumable* conversation, so "latest" never lands on a child or
-		// spec sub-run. An explicit `/resume <id>` below still resolves any session.
-		latest, err := m.sessionStore.LatestResumable()
+		// Latest *resumable* conversation IN THIS WORKSPACE, so "latest" never lands
+		// on a child, a spec sub-run, or a session from another project (matching the
+		// workspace-scoped picker). An explicit `/resume <id>` below still resolves
+		// any session regardless of workspace.
+		latest, err := m.latestResumableInWorkspace()
 		if err != nil {
 			return nil, err
 		}
@@ -321,6 +324,18 @@ func (m model) newSessionPicker() *commandPicker {
 	now := m.now()
 	items := make([]pickerItem, 0, len(metas))
 	for _, meta := range metas {
+		// Workspace-scoped: hide sessions from other project directories so /resume
+		// lists this workspace's history, not every project's. Checked BEFORE the
+		// per-session event read below, so a large global history doesn't pay 50
+		// full file reads to build one workspace's list. Sessions with no recorded
+		// Cwd (older runs) stay visible rather than vanishing.
+		if !sessionMatchesWorkspace(meta.Cwd, m.cwd) {
+			continue
+		}
+		// A zero-event session has nothing to resume — skip it without a file read.
+		if meta.EventCount == 0 {
+			continue
+		}
 		// Skip empty/failed runs (no assistant output, no tool calls) — e.g. the
 		// same prompt retried while the model wasn't responding. They have nothing
 		// to resume and otherwise flood the list with identical rows. Still on disk.
@@ -356,6 +371,35 @@ func (m model) newSessionPicker() *commandPicker {
 // resuming: a tool call/result, or a non-user message with real content (not the
 // no-output guardrail stop). Empty/failed runs return false and are hidden from
 // the picker (they stay on disk). Errors fail open (the session is kept).
+// latestResumableInWorkspace returns the most-recently-updated resumable session
+// belonging to the current workspace, or nil when none exist. ListResumable is
+// ordered latest-first, so the first workspace match is the latest.
+func (m model) latestResumableInWorkspace() (*sessions.Metadata, error) {
+	metas, err := m.sessionStore.ListResumable()
+	if err != nil {
+		return nil, err
+	}
+	for i := range metas {
+		if sessionMatchesWorkspace(metas[i].Cwd, m.cwd) {
+			return &metas[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// sessionMatchesWorkspace reports whether a session recorded in sessionCwd
+// belongs to the current workspaceCwd. A session with no recorded Cwd (older
+// runs) or an unknown current workspace is kept visible rather than filtered out,
+// so the scoping never hides history it can't confidently place elsewhere.
+func sessionMatchesWorkspace(sessionCwd, workspaceCwd string) bool {
+	sessionCwd = strings.TrimSpace(sessionCwd)
+	workspaceCwd = strings.TrimSpace(workspaceCwd)
+	if sessionCwd == "" || workspaceCwd == "" {
+		return true
+	}
+	return filepath.Clean(sessionCwd) == filepath.Clean(workspaceCwd)
+}
+
 func (m model) sessionHasResumableContent(sessionID string) bool {
 	events, err := m.sessionStore.ReadEvents(sessionID)
 	if err != nil {
