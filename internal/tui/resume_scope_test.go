@@ -1,6 +1,9 @@
 package tui
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestSessionMatchesWorkspace(t *testing.T) {
 	cases := []struct {
@@ -14,6 +17,9 @@ func TestSessionMatchesWorkspace(t *testing.T) {
 		{"different workspace hidden", "/home/u/other", "/home/u/proj", false},
 		{"session with no cwd stays visible", "", "/home/u/proj", true},
 		{"unknown current workspace keeps all", "/home/u/other", "", true},
+		// Casing: matched case-insensitively on Windows (its FS is), case-sensitively
+		// elsewhere. This exercises the platform-specific branch on each OS's CI.
+		{"case differs only", "/home/U/Proj", "/home/u/proj", runtime.GOOS == "windows"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -373,16 +374,26 @@ func (m model) newSessionPicker() *commandPicker {
 // the picker (they stay on disk). Errors fail open (the session is kept).
 // latestResumableInWorkspace returns the most-recently-updated resumable session
 // belonging to the current workspace, or nil when none exist. ListResumable is
-// ordered latest-first, so the first workspace match is the latest.
+// ordered latest-first, so the first qualifying match is the latest. It applies
+// the SAME filters as newSessionPicker — workspace membership, non-empty
+// metadata, and real resumable content — so `/resume latest` never lands on a
+// zero-event or empty/failed run the picker would have hidden.
 func (m model) latestResumableInWorkspace() (*sessions.Metadata, error) {
 	metas, err := m.sessionStore.ListResumable()
 	if err != nil {
 		return nil, err
 	}
 	for i := range metas {
-		if sessionMatchesWorkspace(metas[i].Cwd, m.cwd) {
-			return &metas[i], nil
+		if !sessionMatchesWorkspace(metas[i].Cwd, m.cwd) {
+			continue
 		}
+		if metas[i].EventCount == 0 {
+			continue
+		}
+		if !m.sessionHasResumableContent(metas[i].SessionID) {
+			continue
+		}
+		return &metas[i], nil
 	}
 	return nil, nil
 }
@@ -390,14 +401,21 @@ func (m model) latestResumableInWorkspace() (*sessions.Metadata, error) {
 // sessionMatchesWorkspace reports whether a session recorded in sessionCwd
 // belongs to the current workspaceCwd. A session with no recorded Cwd (older
 // runs) or an unknown current workspace is kept visible rather than filtered out,
-// so the scoping never hides history it can't confidently place elsewhere.
+// so the scoping never hides history it can't confidently place elsewhere. On
+// Windows the comparison is case-insensitive, since the filesystem is and the
+// same workspace can be spelled with different casing (C:\Proj vs c:\proj).
 func sessionMatchesWorkspace(sessionCwd, workspaceCwd string) bool {
 	sessionCwd = strings.TrimSpace(sessionCwd)
 	workspaceCwd = strings.TrimSpace(workspaceCwd)
 	if sessionCwd == "" || workspaceCwd == "" {
 		return true
 	}
-	return filepath.Clean(sessionCwd) == filepath.Clean(workspaceCwd)
+	a := filepath.Clean(sessionCwd)
+	b := filepath.Clean(workspaceCwd)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func (m model) sessionHasResumableContent(sessionID string) bool {
