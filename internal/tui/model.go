@@ -3814,6 +3814,11 @@ func (m model) handleSubmit() (tea.Model, tea.Cmd) {
 		m, text = m.handleEffortCommand(command.text)
 		m.transcript = reduceTranscript(m.transcript, transcriptAction{kind: actionAppendSystem, text: text})
 		return m, nil
+	case commandFast:
+		var text string
+		m, text = m.handleFastCommand(command.text)
+		m.transcript = reduceTranscript(m.transcript, transcriptAction{kind: actionAppendSystem, text: text})
+		return m, nil
 	case commandStyle:
 		text := ""
 		m, text = m.handleStyleCommand(command.text)

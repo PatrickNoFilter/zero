@@ -42,6 +42,7 @@ const (
 	commandSelfCorrect
 	commandTurns
 	commandNew
+	commandFast
 	commandUnknown
 )
 
@@ -234,6 +235,13 @@ var commandDefinitions = []commandDefinition{
 		group:       commandGroupModel,
 		description: "Show or set reasoning effort for supported models.",
 		kind:        commandEffort,
+	},
+	{
+		name:        "/fast",
+		usage:       "/fast [on|off]",
+		group:       commandGroupModel,
+		description: "Enable fast mode for the current model (/fast off to disable).",
+		kind:        commandFast,
 	},
 	{
 		name:        "/style",
