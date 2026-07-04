@@ -42,6 +42,7 @@ const (
 	commandSelfCorrect
 	commandTurns
 	commandNew
+	commandLoop
 	commandUnknown
 )
 
@@ -256,6 +257,13 @@ var commandDefinitions = []commandDefinition{
 		group:       commandGroupSession,
 		description: "Show or set the per-run tool-turn budget for this session (raise it for long multi-step tasks).",
 		kind:        commandTurns,
+	},
+	{
+		name:        "/loop",
+		usage:       "/loop [interval] <prompt|/command> | /loop list | /loop stop [id|all]",
+		group:       commandGroupSession,
+		description: "Repeat a prompt or command on an interval (e.g. /loop 5m /babysit-prs), or self-paced when no interval is given.",
+		kind:        commandLoop,
 	},
 	{
 		name:        "/help",
