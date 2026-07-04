@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -79,11 +80,14 @@ func TestHandleExportCommandWritesFile(t *testing.T) {
 		t.Fatalf("exported content = %q", string(data))
 	}
 	// The transcript may contain secrets echoed in tool output; it must not be
-	// world/group-readable.
-	if info, err := os.Stat(outPath); err != nil {
-		t.Fatalf("stat exported file: %v", err)
-	} else if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("exported file mode = %o, want 0600", perm)
+	// world/group-readable. Unix perm bits are meaningless on Windows (os.WriteFile
+	// ignores them and Stat reports 0666), so only assert the mode where it applies.
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(outPath); err != nil {
+			t.Fatalf("stat exported file: %v", err)
+		} else if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("exported file mode = %o, want 0600", perm)
+		}
 	}
 
 	// No-arg export derives a timestamped filename in cwd.
