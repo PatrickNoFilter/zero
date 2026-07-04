@@ -45,6 +45,7 @@ const (
 	commandEdit
 	commandCopy
 	commandExport
+	commandNew
 	commandUnknown
 )
 
@@ -157,6 +158,13 @@ var commandDefinitions = []commandDefinition{
 		group:       commandGroupMeta,
 		description: "Clear the visible transcript.",
 		kind:        commandClear,
+	},
+	{
+		name:        "/new",
+		usage:       "/new",
+		group:       commandGroupSession,
+		description: "Start a fresh session; the current one stays resumable via /resume.",
+		kind:        commandNew,
 	},
 	{
 		name:        "/search",
