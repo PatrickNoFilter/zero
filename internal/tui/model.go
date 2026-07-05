@@ -326,7 +326,7 @@ type model struct {
 	// (where AllMotion's 1003 tracking is unreliable, especially via proot,
 	// breaking touch-gesture scrolling). CellMotion still reports wheel events
 	// correctly. Set via mouseModeForTermEnv at model construction.
-	mouseMode tea.MouseMode
+	mouseMode           tea.MouseMode
 	transcriptSelection transcriptSelectionState
 	// hover identifies the single clickable row (if any) currently under the
 	// mouse cursor with no button pressed, so it renders in a distinct style —
