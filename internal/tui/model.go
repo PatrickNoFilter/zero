@@ -1404,12 +1404,21 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Termux/Android-friendly scroll keys — Ctrl+U/D for half-page,
 		// Shift+Up/Down for line scroll. These work without PgUp/PgDn keys
 		// and without reliable mouse-wheel events through proot.
+		// Gated behind the same focused-surface checks as the PgUp/Dn cases
+		// and the mouse-wheel handler so they don't interfere with modal,
+		// wizard, picker, or permission-prompt input.
 		case keyCtrl(msg, 'u'):
 			if m.transcriptDetailed {
 				return m, nil
 			}
 			if m.composerValue() != "" {
 				break // let the input field handle it (undo in some terminals)
+			}
+			if m.pendingPermission != nil || m.pendingAskUser != nil ||
+				m.providerWizard != nil || m.mcpAddWizard != nil ||
+				m.mcpManager != nil || m.picker != nil ||
+				m.suggestionsActive() {
+				break
 			}
 			m = m.clearHover()
 			return m.scrollChat(m.chatPageScrollLines()/2 + 1), nil
@@ -1420,17 +1429,35 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.composerValue() != "" {
 				break
 			}
+			if m.pendingPermission != nil || m.pendingAskUser != nil ||
+				m.providerWizard != nil || m.mcpAddWizard != nil ||
+				m.mcpManager != nil || m.picker != nil ||
+				m.suggestionsActive() {
+				break
+			}
 			m = m.clearHover()
 			return m.scrollChat(-(m.chatPageScrollLines()/2 + 1)), nil
 		case keyShift(msg) && keyIs(msg, tea.KeyUp):
 			if m.transcriptDetailed {
 				return m, nil
 			}
+			if m.pendingPermission != nil || m.pendingAskUser != nil ||
+				m.providerWizard != nil || m.mcpAddWizard != nil ||
+				m.mcpManager != nil || m.picker != nil ||
+				m.suggestionsActive() {
+				break
+			}
 			m = m.clearHover()
 			return m.scrollChat(1), nil
 		case keyShift(msg) && keyIs(msg, tea.KeyDown):
 			if m.transcriptDetailed {
 				return m, nil
+			}
+			if m.pendingPermission != nil || m.pendingAskUser != nil ||
+				m.providerWizard != nil || m.mcpAddWizard != nil ||
+				m.mcpManager != nil || m.picker != nil ||
+				m.suggestionsActive() {
+				break
 			}
 			m = m.clearHover()
 			return m.scrollChat(-1), nil

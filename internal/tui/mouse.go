@@ -11,24 +11,25 @@ import (
 // CellMotion still delivers wheel events for scroll, click-for-selection, and drag,
 // so it is a safe fallback that keeps the main interaction paths working without
 // the hover-highlight polish that AllMotion enables.
+//
+// Detection relies on Termux-specific environment variables:
+//   - TERMUX_VERSION — only set inside Termux (most reliable signal)
+//   - PREFIX — starts with /data/data/com.termux/files/usr
+//   - ANDROID_ROOT == /system — present on all Android systems
+//
+// PROOT_CWD and CONTAINER are NOT reliable guest-side PRoot signals and are
+// intentionally omitted.
 func mouseModeForTermEnv() tea.MouseMode {
-	term := os.Getenv("TERMUX_VERSION")
-	proot := os.Getenv("PROOT_CWD")
-	container := os.Getenv("CONTAINER")
-
-	// Termux on Android — touch gestures send wheel events through proot
-	// unreliably with AllMotion (1003 tracking). Drop to CellMotion.
-	if term != "" || proot != "" || container != "" {
+	switch {
+	case os.Getenv("TERMUX_VERSION") != "":
 		return tea.MouseModeCellMotion
-	}
-
-	// Also check for known Android environment variables
-	androidRoot := os.Getenv("ANDROID_ROOT")
-	if androidRoot == "/system" {
+	case os.Getenv("PREFIX") != "":
 		return tea.MouseModeCellMotion
+	case os.Getenv("ANDROID_ROOT") == "/system":
+		return tea.MouseModeCellMotion
+	default:
+		return tea.MouseModeAllMotion
 	}
-
-	return tea.MouseModeAllMotion
 }
 
 type mouseOverlayHit struct {
