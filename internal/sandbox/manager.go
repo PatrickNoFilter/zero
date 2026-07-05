@@ -3,8 +3,9 @@ package sandbox
 import (
 	"errors"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 // errWindowsSandboxNotInitialized is returned only to a caller that explicitly
@@ -121,9 +122,35 @@ func (manager SandboxManager) Backend() Backend {
 	return manager.backend
 }
 
+// lookupExecutable checks whether a named binary exists and is executable,
+// using os.Stat instead of exec.LookPath. exec.LookPath internally uses the
+// faccessat2 syscall, which is blocked by Android's seccomp filter (SIGSYS).
+func lookupExecutable(name string) (string, error) {
+	if !strings.Contains(name, string(os.PathSeparator)) {
+		path := os.Getenv("PATH")
+		for _, dir := range strings.Split(path, string(os.PathListSeparator)) {
+			candidate := filepath.Join(dir, name)
+			if fi, err := os.Stat(candidate); err == nil {
+				if fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
+					return candidate, nil
+				}
+			}
+		}
+		return "", errors.New("executable file not found in $PATH")
+	}
+	fi, err := os.Stat(name)
+	if err != nil {
+		return "", err
+	}
+	if fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
+		return name, nil
+	}
+	return "", errors.New("executable file not found")
+}
+
 func selectPlatformBackend(goos string, lookup func(string) (string, error)) Backend {
 	if lookup == nil {
-		lookup = exec.LookPath
+		lookup = lookupExecutable
 	}
 	switch goos {
 	case "linux":
