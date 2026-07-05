@@ -309,3 +309,23 @@ func TestPermissionRenderShowsNetworkTargetAndHostScopedAlways(t *testing.T) {
 		t.Fatalf("network prompt should render target label, got %q", got)
 	}
 }
+
+func TestPermissionCursorCtrlU(t *testing.T) {
+	m := pendingPermissionModel(t, func(agent.PermissionDecision) {})
+	// Ctrl+U is "up" half-page — should move cursor UP (-1), wrapping to last.
+	updated, _ := m.Update(testKeyCtrl('u'))
+	m = updated.(model)
+	if want := len(permissionOptions(m.pendingPermission.request)) - 1; m.pendingPermission.cursor != want {
+		t.Fatalf("Ctrl+U from 0 should wrap to %d, got %d", want, m.pendingPermission.cursor)
+	}
+}
+
+func TestPermissionCursorCtrlD(t *testing.T) {
+	m := pendingPermissionModel(t, func(agent.PermissionDecision) {})
+	// Ctrl+D is "down" half-page — should move cursor DOWN (+1).
+	updated, _ := m.Update(testKeyCtrl('d'))
+	m = updated.(model)
+	if m.pendingPermission.cursor != 1 {
+		t.Fatalf("Ctrl+D from 0 should advance to 1, got %d", m.pendingPermission.cursor)
+	}
+}

@@ -417,3 +417,31 @@ func TestAskUserEmptyRequestResolvesImmediately(t *testing.T) {
 		t.Fatalf("an empty request should resolve immediately, got %#v", answers)
 	}
 }
+
+func TestAskUserCursorCtrlU(t *testing.T) {
+	var answers [][]string
+	next := newAskUserModel(t, askUserSingle([]string{"React", "Vue", "Svelte"}, "Vue"), &answers)
+	if next.pendingAskUser == nil {
+		t.Fatal("setup: expected a pending ask-user prompt")
+	}
+	// Ctrl+U from recommended (cursor=1) should move UP to 0 (React).
+	updated, _ := next.Update(testKeyCtrl('u'))
+	m := updated.(model)
+	if m.pendingAskUser.states[0].cursor != 0 {
+		t.Fatalf("Ctrl+U from cursor 1 should move to 0, got %d", m.pendingAskUser.states[0].cursor)
+	}
+}
+
+func TestAskUserCursorCtrlD(t *testing.T) {
+	var answers [][]string
+	next := newAskUserModel(t, askUserSingle([]string{"React", "Vue", "Svelte"}, "Vue"), &answers)
+	if next.pendingAskUser == nil {
+		t.Fatal("setup: expected a pending ask-user prompt")
+	}
+	// Ctrl+D from recommended (cursor=1) should move DOWN to 2 (Svelte).
+	updated, _ := next.Update(testKeyCtrl('d'))
+	m := updated.(model)
+	if m.pendingAskUser.states[0].cursor != 2 {
+		t.Fatalf("Ctrl+D from cursor 1 should move to 2, got %d", m.pendingAskUser.states[0].cursor)
+	}
+}
