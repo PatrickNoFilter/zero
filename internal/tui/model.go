@@ -1402,65 +1402,8 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.clearHover()
 			return m.scrollChat(-m.chatPageScrollLines()), nil
 		// Termux/Android-friendly scroll keys — Ctrl+U/D for half-page,
-		// Shift+Up/Down for line scroll. These work without PgUp/PgDn keys
-		// and without reliable mouse-wheel events through proot.
-		// Gated behind the same focused-surface checks as the PgUp/Dn cases
-		// and the mouse-wheel handler so they don't interfere with modal,
-		// wizard, picker, or permission-prompt input.
-		case keyCtrl(msg, 'u'):
-			if m.transcriptDetailed {
-				return m, nil
-			}
-			if m.composerValue() != "" {
-				break // let the input field handle it (undo in some terminals)
-			}
-			if m.pendingPermission != nil || m.pendingAskUser != nil ||
-				m.providerWizard != nil || m.mcpAddWizard != nil ||
-				m.mcpManager != nil || m.picker != nil ||
-				m.suggestionsActive() {
-				break
-			}
-			m = m.clearHover()
-			return m.scrollChat(m.chatPageScrollLines()/2 + 1), nil
-		case keyCtrl(msg, 'd'):
-			if m.transcriptDetailed {
-				return m, nil
-			}
-			if m.composerValue() != "" {
-				break
-			}
-			if m.pendingPermission != nil || m.pendingAskUser != nil ||
-				m.providerWizard != nil || m.mcpAddWizard != nil ||
-				m.mcpManager != nil || m.picker != nil ||
-				m.suggestionsActive() {
-				break
-			}
-			m = m.clearHover()
-			return m.scrollChat(-(m.chatPageScrollLines()/2 + 1)), nil
-		case keyShift(msg) && keyIs(msg, tea.KeyUp):
-			if m.transcriptDetailed {
-				return m, nil
-			}
-			if m.pendingPermission != nil || m.pendingAskUser != nil ||
-				m.providerWizard != nil || m.mcpAddWizard != nil ||
-				m.mcpManager != nil || m.picker != nil ||
-				m.suggestionsActive() {
-				break
-			}
-			m = m.clearHover()
-			return m.scrollChat(1), nil
-		case keyShift(msg) && keyIs(msg, tea.KeyDown):
-			if m.transcriptDetailed {
-				return m, nil
-			}
-			if m.pendingPermission != nil || m.pendingAskUser != nil ||
-				m.providerWizard != nil || m.mcpAddWizard != nil ||
-				m.mcpManager != nil || m.picker != nil ||
-				m.suggestionsActive() {
-				break
-			}
-			m = m.clearHover()
-			return m.scrollChat(-1), nil
+		// Shift+Up/Down for line scroll — are at the bottom of the switch,
+		// after the focused-surface handlers (see below).
 		case keyIs(msg, tea.KeyDown):
 			if m.transcriptDetailed {
 				return m, nil
@@ -1539,6 +1482,124 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.historyRecallActive() {
 				return m.recallHistory(-1), nil
 			}
+		// Termux/Android-friendly scroll keys — Ctrl+U/D for half-page,
+		// Shift+Up/Down for line scroll. Placed after the focused-surface
+		// handlers (KeyDown, KeyUp) so wizard/modal/picker keys are
+		// processed first via return-through-handler.
+		case keyCtrl(msg, 'u'):
+			if m.transcriptDetailed {
+				return m, nil
+			}
+			if m.composerValue() != "" {
+				break // let the input field handle it (undo in some terminals)
+			}
+			if m.pendingPermission != nil {
+				return m.movePermissionCursor(1), nil
+			}
+			if m.pendingAskUser != nil {
+				return m.moveAskUserCursor(1), nil
+			}
+			if m.providerWizard != nil {
+				return m.handleProviderWizardKey(msg)
+			}
+			if m.mcpAddWizard != nil {
+				return m.handleMCPAddWizardKey(msg)
+			}
+			if m.mcpManager != nil {
+				return m.handleMCPManagerKey(msg)
+			}
+			if m.picker != nil {
+				break
+			}
+			if m.suggestionsActive() {
+				break
+			}
+			m = m.clearHover()
+			return m.scrollChat(m.chatPageScrollLines()/2 + 1), nil
+		case keyCtrl(msg, 'd'):
+			if m.transcriptDetailed {
+				return m, nil
+			}
+			if m.composerValue() != "" {
+				break
+			}
+			if m.pendingPermission != nil {
+				return m.movePermissionCursor(-1), nil
+			}
+			if m.pendingAskUser != nil {
+				return m.moveAskUserCursor(-1), nil
+			}
+			if m.providerWizard != nil {
+				return m.handleProviderWizardKey(msg)
+			}
+			if m.mcpAddWizard != nil {
+				return m.handleMCPAddWizardKey(msg)
+			}
+			if m.mcpManager != nil {
+				return m.handleMCPManagerKey(msg)
+			}
+			if m.picker != nil {
+				break
+			}
+			if m.suggestionsActive() {
+				break
+			}
+			m = m.clearHover()
+			return m.scrollChat(-(m.chatPageScrollLines()/2 + 1)), nil
+		case keyShift(msg) && keyIs(msg, tea.KeyUp):
+			if m.transcriptDetailed {
+				return m, nil
+			}
+			if m.pendingPermission != nil {
+				return m.movePermissionCursor(-1), nil
+			}
+			if m.pendingAskUser != nil {
+				return m.moveAskUserCursor(-1), nil
+			}
+			if m.providerWizard != nil {
+				return m.handleProviderWizardKey(msg)
+			}
+			if m.mcpAddWizard != nil {
+				return m.handleMCPAddWizardKey(msg)
+			}
+			if m.mcpManager != nil {
+				return m.handleMCPManagerKey(msg)
+			}
+			if m.picker != nil {
+				break
+			}
+			if m.suggestionsActive() {
+				break
+			}
+			m = m.clearHover()
+			return m.scrollChat(1), nil
+		case keyShift(msg) && keyIs(msg, tea.KeyDown):
+			if m.transcriptDetailed {
+				return m, nil
+			}
+			if m.pendingPermission != nil {
+				return m.movePermissionCursor(1), nil
+			}
+			if m.pendingAskUser != nil {
+				return m.moveAskUserCursor(1), nil
+			}
+			if m.providerWizard != nil {
+				return m.handleProviderWizardKey(msg)
+			}
+			if m.mcpAddWizard != nil {
+				return m.handleMCPAddWizardKey(msg)
+			}
+			if m.mcpManager != nil {
+				return m.handleMCPManagerKey(msg)
+			}
+			if m.picker != nil {
+				break
+			}
+			if m.suggestionsActive() {
+				break
+			}
+			m = m.clearHover()
+			return m.scrollChat(-1), nil
 		}
 		if m.transcriptDetailed {
 			return m, nil

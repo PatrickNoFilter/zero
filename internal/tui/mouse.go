@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -23,7 +24,7 @@ func mouseModeForTermEnv() tea.MouseMode {
 	switch {
 	case os.Getenv("TERMUX_VERSION") != "":
 		return tea.MouseModeCellMotion
-	case os.Getenv("PREFIX") != "":
+	case strings.HasPrefix(os.Getenv("PREFIX"), "/data/data/com.termux/files/usr"):
 		return tea.MouseModeCellMotion
 	case os.Getenv("ANDROID_ROOT") == "/system":
 		return tea.MouseModeCellMotion
