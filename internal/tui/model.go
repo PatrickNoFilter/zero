@@ -1394,12 +1394,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker != nil {
@@ -1539,12 +1542,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.moveAskUserTab(1), nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker == nil && m.suggestionsActive() {
@@ -1570,12 +1576,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.moveAskUserCursor(-1), nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker != nil {
@@ -1606,12 +1615,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.moveAskUserCursor(1), nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker != nil {
@@ -1641,12 +1653,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.moveAskUserCursor(1), nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker != nil {
@@ -1684,12 +1699,15 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.moveAskUserCursor(-1), nil
 			}
 			if m.providerWizard != nil {
+				m.burstCount = 0
 				return m.handleProviderWizardKey(msg)
 			}
 			if m.mcpAddWizard != nil {
+				m.burstCount = 0
 				return m.handleMCPAddWizardKey(msg)
 			}
 			if m.mcpManager != nil {
+				m.burstCount = 0
 				return m.handleMCPManagerKey(msg)
 			}
 			if m.picker != nil {
