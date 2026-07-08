@@ -2770,6 +2770,13 @@ func TestBurstResetAfterSubmit(t *testing.T) {
 	// Process the agent response so the model is no longer pending
 	resp, _ := m.Update(execCmd(cmd))
 	m = resp.(model)
+	if m.pending {
+		t.Fatal("model should not be pending after agent response")
+	}
+
+	// Reset lastKeyTime so the burst tracker sees a clean gap before the
+	// second round of typing — avoids coupling to fake-clock progression.
+	m.lastKeyTime = time.Time{}
 
 	// After reset, 2 fast chars + Enter should still submit (burstCount < 3)
 	m = typeKeys(m, "ok")
