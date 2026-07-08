@@ -2789,3 +2789,26 @@ func TestBurstResetAfterSubmit(t *testing.T) {
 		t.Fatal("after burst reset, got nil cmd")
 	}
 }
+
+// TestMultilineBurstSubmits: with a \n already in the composer, a 2-char
+// burst + Enter on desktop should still submit (burstCount < 3), not
+// insert another newline.
+func TestMultilineBurstSubmits(t *testing.T) {
+	m := burstTestModel(t, "")
+	// Seed the composer with multiline text via applyComposerKey
+	m.composerActive = true
+	m.composer.text = "hello\nwor"
+	m.composer.cursor = len([]rune(m.composer.text))
+	m.input.SetValue(m.composer.text)
+
+	// Type "ld" fast (2 chars) then Enter
+	m = typeKeys(m, "ld")
+	updated, cmd := m.Update(testKey(tea.KeyEnter))
+	m = updated.(model)
+	if !m.pending {
+		t.Fatal("multiline burst should submit, not insert newline")
+	}
+	if cmd == nil {
+		t.Fatal("multiline burst got nil cmd")
+	}
+}
