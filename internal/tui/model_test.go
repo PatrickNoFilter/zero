@@ -2676,3 +2676,117 @@ func TestOverlayViewportLinesCompositesAndPreservesBackdropText(t *testing.T) {
 		t.Fatalf("overlaid row should keep backdrop margin text alongside the panel, got %q", panelRow)
 	}
 }
+
+// TestTermuxBurstInsertsNewline: under Termux, 3+ rapid chars + Enter inserts newline.
+func TestTermuxBurstInsertsNewline(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("TERMUX_VERSION", "v0.118.0")
+	provider := &fakeProvider{events: []zeroruntime.StreamEvent{
+		{Type: zeroruntime.StreamEventText, Content: "ok"},
+		{Type: zeroruntime.StreamEventDone},
+	}}
+	m := newModel(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		ProviderName: "tokenrouter",
+		ModelName:    "MiniMax-M3",
+		Provider:     provider,
+		Registry:     tools.NewRegistry(),
+	})
+	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	tick := 0
+	m.now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * 60 * time.Millisecond)
+	}
+	m.input.SetValue("")
+	m.width = 100
+	m.height = 30
+
+	for _, ch := range "abc" {
+		updated, _ := m.Update(testKeyText(string(ch)))
+		m = updated.(model)
+	}
+
+	updated, _ := m.Update(testKey(tea.KeyEnter))
+	m = updated.(model)
+	if m.pending {
+		t.Fatal("burst should insert newline, not submit")
+	}
+	if !strings.Contains(m.composerValue(), "\n") {
+		t.Fatalf("burst should insert newline into composer, got %q", m.composerValue())
+	}
+}
+
+// TestTermuxFastTypingSubmits: under Termux, 2 fast chars + Enter still submits.
+func TestTermuxFastTypingSubmits(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("TERMUX_VERSION", "v0.118.0")
+	provider := &fakeProvider{events: []zeroruntime.StreamEvent{
+		{Type: zeroruntime.StreamEventText, Content: "ok"},
+		{Type: zeroruntime.StreamEventDone},
+	}}
+	m := newModel(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		ProviderName: "tokenrouter",
+		ModelName:    "MiniMax-M3",
+		Provider:     provider,
+		Registry:     tools.NewRegistry(),
+	})
+	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	tick := 0
+	m.now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * 60 * time.Millisecond)
+	}
+	m.input.SetValue("")
+	m.width = 100
+	m.height = 30
+
+	for _, ch := range "ab" {
+		updated, _ := m.Update(testKeyText(string(ch)))
+		m = updated.(model)
+	}
+
+	updated, cmd := m.Update(testKey(tea.KeyEnter))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("fast typing should submit, got nil cmd")
+	}
+}
+
+// TestDesktopBurstNotAffected: on desktop (no TERMUX_VERSION), 3 fast chars + Enter submits.
+func TestDesktopBurstNotAffected(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("TERMUX_VERSION", "")
+	provider := &fakeProvider{events: []zeroruntime.StreamEvent{
+		{Type: zeroruntime.StreamEventText, Content: "ok"},
+		{Type: zeroruntime.StreamEventDone},
+	}}
+	m := newModel(context.Background(), Options{
+		Cwd:          t.TempDir(),
+		ProviderName: "tokenrouter",
+		ModelName:    "MiniMax-M3",
+		Provider:     provider,
+		Registry:     tools.NewRegistry(),
+	})
+	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	tick := 0
+	m.now = func() time.Time {
+		tick++
+		return base.Add(time.Duration(tick) * 60 * time.Millisecond)
+	}
+	m.input.SetValue("")
+	m.width = 100
+	m.height = 30
+
+	for _, ch := range "abc" {
+		updated, _ := m.Update(testKeyText(string(ch)))
+		m = updated.(model)
+	}
+
+	updated, cmd := m.Update(testKey(tea.KeyEnter))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("desktop burst should submit, got nil cmd")
+	}
+}

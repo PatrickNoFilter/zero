@@ -1421,11 +1421,13 @@ func (m model) updateModel(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.suggestionsActive() {
 				return m.chooseSuggestion()
 			}
-			// Timing-based paste protection: 3+ rapid keys within 100ms
-			// means we are inside a character-by-character paste (Termux
-			// context menu). 1-2 fast keys + Enter is normal fast typing
-			// and should submit, not insert newline.
-			if m.burstCount > 2 {
+			// Timing-based paste protection: under Termux, context-menu paste
+			// injects characters one at a time (including newlines as raw
+			// KeyEnter events). A sustained burst of 3+ keys within 100ms
+			// means we are inside a char-by-char paste — insert newline
+			// instead of submitting. Gated to Termux so fast desktop typing
+			// (which can reach similar inter-key intervals) is never affected.
+			if os.Getenv("TERMUX_VERSION") != "" && m.burstCount > 2 {
 				state := m.currentComposerState()
 				m = m.insertComposerTextWithPastePreview(state, "\n", "")
 				m.clearSuggestions()
